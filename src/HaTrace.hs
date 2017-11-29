@@ -120,7 +120,7 @@ data Syscall
 
 parseSyscall :: X86_64Regs -> Maybe Syscall
 parseSyscall X86_64Regs {..} =
-    case rax of
+    case orig_rax of
         0x3 -> Just Read
         0x4 -> Just Write
         _ -> Nothing
