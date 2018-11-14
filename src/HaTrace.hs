@@ -114,13 +114,50 @@ printX86_64Regs r =
         Just sc -> print sc
 
 data Syscall
-    = Read
+    = Exit
+    | Fork
+    | Read
     | Write
+    | Open
+    | Close
+    | Execve
+    | Prctl
+    | ArchPrctl
+    | Access
+    | Poll
+    | Openat
+    | Fstat
+    | Lstat
+    | Nanosleep
+    | Mmap
+    | Lseek
+    | Stat
+    | Mprotect
+    | Munmap
+    | Brk
+    | ExitGroup
     deriving (Show, Eq)
 
 parseSyscall :: X86_64Regs -> Maybe Syscall
 parseSyscall X86_64Regs {..} =
     case orig_rax of
-        0x3 -> Just Read
-        0x4 -> Just Write
+        0 -> Just Read
+        1 -> Just Write
+        2 -> Just Open
+        3 -> Just Close
+        4 -> Just Stat
+        5 -> Just Fstat
+        6 -> Just Lstat
+        7 -> Just Poll
+        8 -> Just Lseek
+        9 -> Just Mmap
+        10 -> Just Mprotect
+        11 -> Just Munmap
+        12 -> Just Brk
+        21 -> Just Access
+        35 -> Just Nanosleep
+        157 -> Just Prctl
+        158 -> Just ArchPrctl
+        231 -> Just ExitGroup
+        257 -> Just Openat
         _ -> Nothing
