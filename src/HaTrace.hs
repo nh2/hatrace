@@ -142,7 +142,7 @@ printX86Regs = print
 printX86_64Regs :: X86_64Regs -> IO ()
 printX86_64Regs r =
     case parseSyscall r of
-        Nothing -> putStrLn "Unknown Syscall."
+        Nothing -> putStrLn $ "Unknown syscall number: " ++ show (orig_rax r)
         Just sc -> print sc
 
 data Syscall
