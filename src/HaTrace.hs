@@ -74,20 +74,19 @@ traceForkExec args = do
     loop
 
 
-waitForSyscall :: CPid -> IO (Either ExitCode Signal)
-waitForSyscall cpid = do
-    ptrace_syscall cpid Nothing
-    mr <- waitpid cpid []
+waitForSyscall :: (HasCallStack) => CPid -> IO (Either ExitCode Signal)
+waitForSyscall pid = do
+    ptrace_syscall pid Nothing
+    mr <- waitpid pid []
     case mr of
-        Nothing -> error "No idea what this means."
-        Just (_, status) -- TODO what does this first part do?
-         ->
+        Nothing -> error "waitForSyscall: no PID was returned by waitpid"
+        Just (_returnedPid, status) -> -- TODO must we have different logic if any other pid (e.g. thread, child process of traced process) was returned?
             case status of
                 Exited i -> do
                     case i of
                         0 -> pure $ Left ExitSuccess
                         _ -> pure $ Left $ ExitFailure i
-                Continued -> waitForSyscall cpid
+                Continued -> waitForSyscall pid
                 Signaled sig -> pure $ Right sig
                 Stopped sig -> pure $ Right sig
 
