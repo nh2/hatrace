@@ -22,8 +22,21 @@ import System.Posix.Signals
 import System.Posix.Types
 import System.Posix.Waitpid
 
-foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CInt -> Ptr (Ptr CChar) -> IO CPid
 
+waitpidForExactPidOrError :: (HasCallStack) => CPid -> IO ()
+waitpidForExactPidOrError pid = do
+    mr <- waitpid pid []
+    case mr of
+        Nothing -> error "forkExecWithPtrace: BUG: no PID was returned by waitpid"
+        Just (returnedPid, status)
+            | returnedPid /= pid -> error $ "forkExecWithPtrace: BUG: returned PID != expected pid: " ++ show (returnedPid, pid)
+            | otherwise ->
+                case status of
+                    Stopped sig | sig == sigSTOP -> return () -- all OK
+                    _ -> error $ "forkExecWithPtrace: BUG: unexpected status: " ++ show status
+
+
+foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CInt -> Ptr (Ptr CChar) -> IO CPid
 
 -- | Forks a tracee process, makes it PTRACE_TRACEME and then SIGSTOP itself.
 -- Waits for the tracee process to have entered the STOPPED state.
@@ -37,15 +50,7 @@ forkExecWithPtrace args = do
             let argc = genericLength args
             throwErrnoIfMinus1 "fork_exec_with_ptrace" $ c_fork_exec_with_ptrace argc argsPtr
     -- Wait for the tracee to stop itself
-    mr <- waitpid childPid []
-    case mr of
-        Nothing -> error "forkExecWithPtrace: BUG: no PID was returned by waitpid"
-        Just (returnedPid, status)
-            | returnedPid /= childPid -> error $ "forkExecWithPtrace: BUG: returned PID != expected pid: " ++ show (returnedPid, childPid)
-            | otherwise ->
-                case status of
-                    Stopped sig | sig == sigSTOP -> return () -- all OK
-                    _ -> error $ "forkExecWithPtrace: BUG: unexpected status: " ++ show status
+    waitpidForExactPidOrError childPid
     return childPid
 
 
