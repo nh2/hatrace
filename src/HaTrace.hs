@@ -5,7 +5,6 @@ module HaTrace
     , forkExecWithPtrace
     ) where
 
-import Control.Concurrent.MVar
 import Data.List (find, genericLength)
 import Foreign.C.Types
 import Foreign.C.Error (throwErrnoIfMinus1)
@@ -16,15 +15,12 @@ import Foreign.Ptr (Ptr)
 import GHC.Stack (HasCallStack)
 
 import System.Exit
-import System.Linux.Ptrace
 import System.Linux.Ptrace.Syscall
 import System.Linux.Ptrace.Types
 import System.Linux.Ptrace.X86_64Regs
 import System.Posix.Signals
 import System.Posix.Types
 import System.Posix.Waitpid
-import System.Process
-import System.Process.Internals
 
 foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CInt -> Ptr (Ptr CChar) -> IO CPid
 
@@ -79,16 +75,16 @@ waitForSyscall cpid = do
     mr <- waitpid cpid []
     case mr of
         Nothing -> error "No idea what this means."
-        Just (_, s) -- TODO what does this first part do?
+        Just (_, status) -- TODO what does this first part do?
          ->
-            case s of
+            case status of
                 Exited i -> do
                     case i of
                         0 -> pure $ Left ExitSuccess
                         _ -> pure $ Left $ ExitFailure i
                 Continued -> waitForSyscall cpid
-                Signaled s -> pure $ Right s
-                Stopped s -> pure $ Right s
+                Signaled sig -> pure $ Right sig
+                Stopped sig -> pure $ Right sig
 
 printSignal :: Signal -> IO ()
 printSignal s =
