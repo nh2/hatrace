@@ -141,7 +141,7 @@ printX86Regs = print
 
 printX86_64Regs :: X86_64Regs -> IO ()
 printX86_64Regs r =
-    case parseSyscall r of
+    case parseSyscallX86_64 r of
         Nothing -> putStrLn $ "Unknown syscall number: " ++ show (orig_rax r)
         Just sc -> print sc
 
@@ -150,9 +150,9 @@ data Syscall
     | Write
     deriving (Show, Eq)
 
-parseSyscall :: X86_64Regs -> Maybe Syscall
-parseSyscall X86_64Regs {..} =
+parseSyscallX86_64 :: X86_64Regs -> Maybe Syscall
+parseSyscallX86_64 X86_64Regs {..} =
     case orig_rax of
-        0x3 -> Just Read
-        0x4 -> Just Write
+        0 -> Just Read
+        1 -> Just Write
         _ -> Nothing
