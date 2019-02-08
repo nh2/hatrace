@@ -29,15 +29,15 @@ traceCreateProcess cp = do
             ph__ <- readMVar mvar
             case ph__ of
                 ClosedHandle ec -> pure ec
-                OpenHandle cpid -> do
-                    tp <- traceProcess cpid
+                OpenHandle childPid -> do
+                    tp <- traceProcess childPid
                     let loop = do
-                            exitOrSignal <- waitForSyscall cpid
+                            exitOrSignal <- waitForSyscall childPid
                             case exitOrSignal of
                                 Left ec -> pure ec
                                 Right s -> do
                                     printSignal s
-                                    printSyscall cpid
+                                    printSyscall childPid
                                     loop
                     loop
 
