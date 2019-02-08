@@ -1,5 +1,6 @@
 module HaTraceSpec where
 
+import System.Exit
 import System.Process (callProcess)
 import Test.Hspec
 
@@ -10,12 +11,12 @@ spec =
     describe "traceCreateProcess" $ do
 
         it "does not crash for this echo process" $ do
-            traceCreateProcess (shell "echo hello") `shouldReturn` ExitSuccess
+            traceForkExec ["echo", "hello"] `shouldReturn` ExitSuccess
 
         it "does not crash for this sleep process" $ do
-            traceCreateProcess (shell "sleep 1") `shouldReturn` ExitSuccess
+            traceForkExec ["sleep", "1"] `shouldReturn` ExitSuccess
 
         it "does not crash for hello.asm" $ do
             -- TODO Instead of compiling here, do it as a Cabal hook.
-            callProcess "make" ["example-programs/hello"]
-            traceCreateProcess (proc "example-programs/hello" []) `shouldReturn` ExitSuccess
+            callProcess "make" ["--quiet", "example-programs/hello"]
+            traceForkExec ["example-programs/hello"] `shouldReturn` ExitSuccess

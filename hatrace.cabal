@@ -13,6 +13,7 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
+  c-sources:           cbits/fork-exec-ptrace.c
   exposed-modules:     HaTrace
   build-depends:       base >= 4.7 && < 5
                      , process

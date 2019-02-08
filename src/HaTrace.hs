@@ -1,14 +1,19 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module HaTrace
-    ( traceCreateProcess
-    -- * Re-exports
-    , module System.Process
-    , ExitCode(..)
+    ( traceForkExec
+    , forkExecWithPtrace
     ) where
 
 import Control.Concurrent.MVar
-import Data.List (find)
+import Data.List (find, genericLength)
+import Foreign.C.Types
+import Foreign.C.Error (throwErrnoIfMinus1)
+import Foreign.Marshal.Array (withArray)
+import Foreign.Marshal.Utils (withMany)
+import System.Posix.Internals (withFilePath)
+import Foreign.Ptr (Ptr)
+import GHC.Stack (HasCallStack)
 
 import System.Exit
 import System.Linux.Ptrace
@@ -21,25 +26,52 @@ import System.Posix.Waitpid
 import System.Process
 import System.Process.Internals
 
-traceCreateProcess :: CreateProcess -> IO ExitCode
-traceCreateProcess cp = do
-    (_, _, _, ph) <- createProcess cp
-    case ph of
-        ProcessHandle mvar b -> do
-            ph__ <- readMVar mvar
-            case ph__ of
-                ClosedHandle ec -> pure ec
-                OpenHandle childPid -> do
-                    tp <- traceProcess childPid
-                    let loop = do
-                            exitOrSignal <- waitForSyscall childPid
-                            case exitOrSignal of
-                                Left ec -> pure ec
-                                Right s -> do
-                                    printSignal s
-                                    printSyscall childPid
-                                    loop
+foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CInt -> Ptr (Ptr CChar) -> IO CPid
+
+
+-- | Forks a tracee process, makes it PTRACE_TRACEME and then SIGSTOP itself.
+-- Waits for the tracee process to have entered the STOPPED state.
+-- After waking up from the stop (as controlled by the tracer, that is,
+-- other functions you'll use after calling this one),
+-- the tracee will execvp() the given program with arguments.
+forkExecWithPtrace :: (HasCallStack) => [String] -> IO CPid
+forkExecWithPtrace args = do
+    childPid <- withMany withFilePath args $ \cstrs -> do
+        withArray cstrs $ \argsPtr -> do
+            let argc = genericLength args
+            throwErrnoIfMinus1 "fork_exec_with_ptrace" $ c_fork_exec_with_ptrace argc argsPtr
+    -- Wait for the tracee to stop itself
+    mr <- waitpid childPid []
+    case mr of
+        Nothing -> error "forkExecWithPtrace: BUG: no PID was returned by waitpid"
+        Just (returnedPid, status)
+            | returnedPid /= childPid -> error $ "forkExecWithPtrace: BUG: returned PID != expected pid: " ++ show (returnedPid, childPid)
+            | otherwise ->
+                case status of
+                    Stopped sig | sig == sigSTOP -> return () -- all OK
+                    _ -> error $ "forkExecWithPtrace: BUG: unexpected status: " ++ show status
+    return childPid
+
+
+-- TODO Make a version of this that takes a CreateProcess.
+--      Note that `System.Linux.Ptrace.traceProcess` isn't good enough,
+--      because it is racy:
+--      It uses PTHREAD_ATTACH, which sends SIGSTOP to the started
+--      process. By that time, the process may already have exited.
+
+traceForkExec :: [String] -> IO ExitCode
+traceForkExec args = do
+    childPid <- forkExecWithPtrace args
+    let loop = do
+            exitOrSignal <- waitForSyscall childPid
+            case exitOrSignal of
+                Left ec -> pure ec
+                Right s -> do
+                    printSignal s
+                    printSyscall childPid
                     loop
+    loop
+
 
 waitForSyscall :: CPid -> IO (Either ExitCode Signal)
 waitForSyscall cpid = do
