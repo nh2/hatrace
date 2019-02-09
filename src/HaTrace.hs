@@ -4,8 +4,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module HaTrace
-    ( traceForkExec
-    , forkExecWithPtrace
+    ( traceForkProcess
+    , traceForkExecvFullPath
+    , forkExecvWithPtrace
     ) where
 
 import Data.Bits ((.|.))
@@ -18,6 +19,7 @@ import Foreign.Marshal.Utils (withMany)
 import System.Posix.Internals (withFilePath)
 import Foreign.Ptr (Ptr, wordPtrToPtr)
 import GHC.Stack (HasCallStack)
+import System.Directory (doesFileExist, findExecutable)
 
 import System.Exit
 import System.Linux.Ptrace (TracedProcess(..), peekBytes)
@@ -34,13 +36,13 @@ waitpidForExactPidOrError :: (HasCallStack) => CPid -> IO ()
 waitpidForExactPidOrError pid = do
     mr <- waitpid pid []
     case mr of
-        Nothing -> error "forkExecWithPtrace: BUG: no PID was returned by waitpid"
+        Nothing -> error "forkExecvWithPtrace: BUG: no PID was returned by waitpid"
         Just (returnedPid, status)
-            | returnedPid /= pid -> error $ "forkExecWithPtrace: BUG: returned PID != expected pid: " ++ show (returnedPid, pid)
+            | returnedPid /= pid -> error $ "forkExecvWithPtrace: BUG: returned PID != expected pid: " ++ show (returnedPid, pid)
             | otherwise ->
                 case status of
                     Stopped sig | sig == sigSTOP -> return () -- all OK
-                    _ -> error $ "forkExecWithPtrace: BUG: unexpected status: " ++ show status
+                    _ -> error $ "forkExecvWithPtrace: BUG: unexpected status: " ++ show status
 
 
 foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CInt -> Ptr (Ptr CChar) -> IO CPid
@@ -53,8 +55,8 @@ foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CIn
 --
 -- Since execv() is used, the first argument must be the /full path/
 -- to the executable.
-forkExecWithPtrace :: (HasCallStack) => [String] -> IO CPid
-forkExecWithPtrace args = do
+forkExecvWithPtrace :: (HasCallStack) => [String] -> IO CPid
+forkExecvWithPtrace args = do
     childPid <- withMany withFilePath args $ \cstrs -> do
         withArray cstrs $ \argsPtr -> do
             let argc = genericLength args
@@ -70,9 +72,9 @@ forkExecWithPtrace args = do
 --      It uses PTHREAD_ATTACH, which sends SIGSTOP to the started
 --      process. By that time, the process may already have exited.
 
-traceForkExec :: [String] -> IO ExitCode
-traceForkExec args = do
-    childPid <- forkExecWithPtrace args
+traceForkExecvFullPath :: [String] -> IO ExitCode
+traceForkExecvFullPath args = do
+    childPid <- forkExecvWithPtrace args
     -- Set `PTRACE_O_TRACESYSGOOD` to make it easy for the tracer
     -- to distinguish normal traps from those caused by a syscall.
     ptrace_setoptions childPid [TraceSysGood]
@@ -91,6 +93,19 @@ traceForkExec args = do
                             printSignal sig
                     loop newState
     loop initialTraceState
+
+
+traceForkProcess :: (HasCallStack) => FilePath -> [String] -> IO ExitCode
+traceForkProcess name args = do
+    exists <- doesFileExist name
+    path <- if
+        | exists -> pure name
+        | otherwise -> do
+            mbExe <- findExecutable "echo"
+            case mbExe of
+                Nothing -> die $ "Cannot find executable: " ++ name
+                Just path -> pure path
+    traceForkExecvFullPath (path:args)
 
 
 -- | The terminology in here is oriented on `man 2 ptrace`.

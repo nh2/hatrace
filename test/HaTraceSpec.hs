@@ -11,12 +11,12 @@ spec =
     describe "traceCreateProcess" $ do
 
         it "does not crash for this echo process" $ do
-            traceForkExec ["/bin/echo", "hello"] `shouldReturn` ExitSuccess
+            traceForkProcess "echo" ["hello"] `shouldReturn` ExitSuccess
 
         it "does not crash for this sleep process" $ do
-            traceForkExec ["/bin/sleep", "1"] `shouldReturn` ExitSuccess
+            traceForkProcess "sleep" ["1"] `shouldReturn` ExitSuccess
 
         it "does not crash for hello.asm" $ do
             -- TODO Instead of compiling here, do it as a Cabal hook.
             callProcess "make" ["--quiet", "example-programs/hello"]
-            traceForkExec ["example-programs/hello"] `shouldReturn` ExitSuccess
+            traceForkProcess "example-programs/hello" [] `shouldReturn` ExitSuccess
