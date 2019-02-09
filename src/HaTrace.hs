@@ -224,9 +224,6 @@ data Syscall
   deriving (Show, Eq)
 
 
--- TODO Get this from kernel headers
-__X32_SYSCALL_BITMASK :: Word64
-__X32_SYSCALL_BITMASK = 0x40000000
 
 
 -- A good resource for syscall numbers across all architectures is
