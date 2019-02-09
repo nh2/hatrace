@@ -1,6 +1,6 @@
 name:                hatrace
 version:             0.1.0.0
-homepage:            https://github.com/NorfairKing/hatrace#readme
+homepage:            https://gitlab.com/Norfair/hatrace#readme
 license:             MIT
 license-file:        LICENSE
 author:              Tom Sydney Kerckhove, Niklas Hambüchen
@@ -38,4 +38,4 @@ test-suite hatrace-test
 
 source-repository head
   type:     git
-  location: https://github.com/NorfairKing/hatrace
+  location: https://gitlab.com/Norfair/hatrace
