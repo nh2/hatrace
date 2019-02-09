@@ -11,15 +11,25 @@ build-type:          Simple
 extra-source-files:  README.md
 cabal-version:       >=1.10
 
+extra-source-files:
+  syscalls-table/tables/syscalls-i386
+  syscalls-table/tables/syscalls-x86_64
+
 library
   hs-source-dirs:      src
   c-sources:           cbits/fork-exec-ptrace.c
   exposed-modules:     HaTrace
+                       HaTrace.SyscallTables
+                       HaTrace.SyscallTables.Generated
   build-depends:       base >= 4.7 && < 5
+                     , bytestring
+                     , containers
                      , directory
                      , linux-ptrace
                      , posix-waitpid
                      , process
+                     , template-haskell
+                     , text
                      , unix
   ghc-options:         -Wall
   default-language:    Haskell2010

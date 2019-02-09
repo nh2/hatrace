@@ -1,0 +1,3 @@
+[submodule "syscalls-table"]
+	path = syscalls-table
+	url = https://github.com/hrw/syscalls-table.git

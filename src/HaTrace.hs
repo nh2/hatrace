@@ -11,6 +11,7 @@ module HaTrace
 
 import           Data.Bits ((.|.))
 import           Data.List (find, genericLength)
+import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (throwErrnoIfMinus1)
 import           Foreign.C.Types (CInt(..), CChar(..))
@@ -30,6 +31,8 @@ import           System.Posix.Signals (Signal, sigTRAP, sigSTOP)
 import qualified System.Posix.Signals as Signals
 import           System.Posix.Types (CPid(..))
 import           System.Posix.Waitpid (waitpid, Status(..))
+
+import           HaTrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 
 
 waitpidForExactPidOrError :: (HasCallStack) => CPid -> IO ()
@@ -216,10 +219,7 @@ printSignal s =
 
 
 data Syscall
-  = Read
-  | Write
-  | Execve
-  | Exit
+  = KnownSyscall KnownSyscall
   | UnknownSyscall !Word64
   deriving (Show, Eq)
 
@@ -233,21 +233,17 @@ __X32_SYSCALL_BITMASK = 0x40000000
 -- https://fedora.juszkiewicz.com.pl/syscalls.html
 
 syscallNumberToName_i386 :: Word32 -> Syscall
-syscallNumberToName_i386 = \case
-  1 -> Exit
-  3 -> Read
-  4 -> Write
-  11 -> Execve
-  i -> UnknownSyscall (fromIntegral i)
+syscallNumberToName_i386 number =
+  case Map.lookup number syscallMap_i386 of
+    Just syscall -> KnownSyscall syscall
+    Nothing -> UnknownSyscall (fromIntegral number)
 
 
 syscallNumberToName_x64_64 :: Word64 -> Syscall
-syscallNumberToName_x64_64 = \case
-  0 -> Read
-  1 -> Write
-  59 -> Execve
-  60 -> Exit
-  i -> UnknownSyscall i
+syscallNumberToName_x64_64 number =
+  case Map.lookup number syscallMap_x64_64 of
+    Just syscall -> KnownSyscall syscall
+    Nothing -> UnknownSyscall number
 
 
 -- | Returns the syscall that we just entered after `waitForSyscall`.
