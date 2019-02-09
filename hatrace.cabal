@@ -17,9 +17,9 @@ library
   exposed-modules:     HaTrace
   build-depends:       base >= 4.7 && < 5
                      , directory
-                     , process
                      , linux-ptrace
                      , posix-waitpid
+                     , process
                      , unix
   ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
