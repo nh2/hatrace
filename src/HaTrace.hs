@@ -1,13 +1,14 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module HaTrace
     ( traceForkExec
     , forkExecWithPtrace
     ) where
 
-import Data.Bits ((.|.), (.&.))
+import Data.Bits ((.|.))
 import Data.List (find, genericLength)
 import Data.Word (Word32, Word64)
 import Foreign.C.Types
@@ -15,10 +16,11 @@ import Foreign.C.Error (throwErrnoIfMinus1)
 import Foreign.Marshal.Array (withArray)
 import Foreign.Marshal.Utils (withMany)
 import System.Posix.Internals (withFilePath)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, wordPtrToPtr)
 import GHC.Stack (HasCallStack)
 
 import System.Exit
+import System.Linux.Ptrace (TracedProcess(..), peekBytes)
 import System.Linux.Ptrace.Syscall
 import System.Linux.Ptrace.Types
 import System.Linux.Ptrace.X86Regs
@@ -159,6 +161,7 @@ printSignal s =
         Just (_, n1, n2) -> do
             print (n1, n2)
   where
+    ls :: [(Signal, String, String)]
     ls =
         [ (nullSignal, "nullSignal", "NULL")
         , (internalAbort, "internalAbort", "ABRT")
@@ -205,6 +208,9 @@ __X32_SYSCALL_BITMASK :: Word64
 __X32_SYSCALL_BITMASK = 0x40000000
 
 
+-- A good resource for syscall numbers across all architectures is
+-- https://fedora.juszkiewicz.com.pl/syscalls.html
+
 syscallNumberToName_i386 :: Word32 -> Syscall
 syscallNumberToName_i386 = \case
     1 -> Exit
@@ -223,31 +229,50 @@ syscallNumberToName_x64_64 = \case
     i -> UnknownSyscall i
 
 
-getEnteredSyscall :: CPid -> IO Syscall
+-- | Returns the syscall that we just entered after `waitForSyscall`.
+--
+-- PRE:
+-- This must be called /only/ after `waitForSyscall`; otherwise it may throw
+-- an `error` when trying to decode opcodes.
+getEnteredSyscall :: CPid -> IO (Syscall)
 getEnteredSyscall cpid = do
     regs <- ptrace_getregs cpid
-    pure $ case regs of
+    case regs of
         X86 X86Regs{ orig_eax } -> do
-            syscallNumberToName_i386 orig_eax
-        X86_64 X86_64Regs{ orig_rax } -> do
-            -- TODO This works only for x32, but not for i386. Figure it out!
-            -- Apparenlty strace on Ubuntu 16.04 also gets it wrong (I tried it).
-            -- This also confirms that strace gets it wrong:
-            --     https://stackoverflow.com/questions/46087730/what-happens-if-you-use-the-32-bit-int-0x80-linux-abi-in-64-bit-code
-            -- Unanswered question on how to detect it:
-            --     https://superuser.com/questions/834122/how-to-distinguish-syscalls-form-int-80h-when-using-ptrace
-            -- Maybe it's impossible?
-            -- The presentation at
-            --     https://www.linuxplumbersconf.org/event/2/contributions/78/attachments/63/74/lpc_2018-what_could_be_done_in_the_kernel_to_make_strace_happy.pdf
-            -- suggests it's impossible ("There is no reliable way to distinguish between x86_64 and x86 syscalls").
-            -- A solution was proposed: https://lwn.net/Articles/772894/
-            -- But `clever` from IRC suggests:
-            -- > strace is using the same api as gdb, so it should be trivial to just look at the instructions the return address points to, and see what it was
-            let is_x32_bitMode = (orig_rax .&. __X32_SYSCALL_BITMASK) /= 0
+            pure $ syscallNumberToName_i386 orig_eax
+        X86_64 X86_64Regs{ orig_rax, rip } -> do
+            -- Check whether it's an x86_64 or a legacy i386 syscall,
+            -- and look up syscall number accordingly.
 
-            -- TODO Check if we should implement special treatment for syscall number -1,
-            -- like strace does in
-            --     https://github.com/strace/strace/blob/2c8b6de913973274e877639658e9e7273a012adb/linux/x86_64/get_scno.c#L43
-            if is_x32_bitMode
+            -- Both the `syscall` instruction and the `int 0x80` instruction
+            -- are 2 Bytes:
+            --   syscall opcode: 0x0F 0x05
+            --   int 0x80 opcode: 0xCD 0x80
+            -- See
+            --   https://www.felixcloutier.com/x86/syscall
+            --   https://www.felixcloutier.com/x86/intn:into:int3:int1
+            let syscallLocation = wordPtrToPtr (fromIntegral (rip - 2)) -- Word is Word64 on this arch
+            -- Note: `peekBytes` has a little-endian-assumption comment in it;
+            -- this may not work on big-endian (I haven't checked it)
+            opcode <- peekBytes (TracedProcess cpid) syscallLocation 2
+
+            let is_i386_mode = case opcode of
+                    "\x0F\x05" -> False
+                    "\xCD\x80" -> True
+                    _ -> error $ "getEnteredSyscall: BUG: Unexpected syscall opcode: " ++ show opcode
+
+            -- We don't implement x32 support any more, because it may
+            -- be removed from the Kernel soon:
+            -- https://lkml.org/lkml/2018/12/10/1151
+
+            pure $ if is_i386_mode
                 then syscallNumberToName_i386 (fromIntegral orig_rax)
                 else syscallNumberToName_x64_64 orig_rax
+
+-- The opcode detection method idea above was motivated by:
+--
+-- * Michael Bishop (`clever` on freenode)
+-- * strace (where it was subsequently removed)
+--   * https://superuser.com/questions/834122/how-to-distinguish-syscalls-form-int-80h-when-using-ptrace/1403397#1403397
+--   * removal: https://github.com/strace/strace/commit/1f84eefc409291354d0dc7db0866eaf27967da42#diff-3abc305048b4c1c134d1cd2e0eb7799eL113
+-- * Linus Torvalds in https://lore.kernel.org/lkml/CA+55aFzcSVmdDj9Lh_gdbz1OzHyEm6ZrGPBDAJnywm2LF_eVyg@mail.gmail.com/
