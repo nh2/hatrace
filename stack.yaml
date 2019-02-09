@@ -1,9 +1,9 @@
-resolver: lts-9.14
+resolver: lts-13.6
 packages:
 - .
 extra-deps:
 - git: https://github.com/nh2/linux-ptrace
-  commit: b8feac180c812dd42b675bf7d2a45ca4ff23626d
+  commit: a085a5c448389e44992d94079ac4eec852ff5e06
 - git: git@github.com:GaloisInc/posix-waitpid.git
   commit: 291b970f2ec6f57e6c65dde2432d7bf198f307c3
 
