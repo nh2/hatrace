@@ -88,8 +88,7 @@ traceForkExecvFullPath args = do
           Left exitCode -> pure exitCode
           Right stopType -> do
             case stopType of
-              SyscallStop SyscallEnter -> do
-                (syscall, syscallArgs) <- getEnteredSyscall childPid
+              SyscallStop (SyscallEnter (syscall, syscallArgs)) -> do
                 details <- case syscall of
                   KnownSyscall Syscall_write -> do
                     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = bufLen } = syscallArgs
@@ -97,10 +96,11 @@ traceForkExecvFullPath args = do
                     writeBs <- peekBytes (TracedProcess childPid) bufPtr (fromIntegral bufLen)
                     return $ "write(" ++ show fd ++ ", " ++ show writeBs ++ ")"
                   _ -> return ""
-                putStrLn $ "Entering syscall: " ++ show syscall ++ (if details /= "" then " " ++ details else "")
-              SyscallStop SyscallExit -> do
+                putStrLn $ "Entering syscall: " ++ show syscall
+                  ++ (if details /= "" then ", details: " ++ details else "")
+              SyscallStop (SyscallExit (syscall, _syscallArgs)) -> do
                 result <- getExitedSyscallResult childPid
-                putStrLn $ "Exited syscall; result: " ++ show result
+                putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
               SignalDeliveryStop sig -> do
                 printSignal sig
             loop newState
@@ -121,7 +121,9 @@ traceForkProcess name args = do
 
 
 -- | The terminology in here is oriented on `man 2 ptrace`.
-data SyscallStopType = SyscallEnter | SyscallExit
+data SyscallStopType
+  = SyscallEnter (Syscall, SyscallArgs)
+  | SyscallExit (Syscall, SyscallArgs)
   deriving (Eq, Ord, Show)
 
 
@@ -150,19 +152,19 @@ data StopType
 --
 -- We use this data structure to track it.
 data TraceState = TraceState
-  { inSyscall :: !Bool -- ^ must be set to false if it's true and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@
+  { currentSyscall :: !(Maybe (Syscall, SyscallArgs)) -- ^ must be set to Nothingg if it's Just{} and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@
   } deriving (Eq, Ord, Show)
 
 
 initialTraceState :: TraceState
 initialTraceState =
   TraceState
-    { inSyscall = False
+    { currentSyscall = Nothing
     }
 
 
 waitForSyscall :: (HasCallStack) => CPid -> TraceState -> IO (TraceState, Either ExitCode StopType)
-waitForSyscall pid state@TraceState{ inSyscall } = do
+waitForSyscall pid state@TraceState{ currentSyscall } = do
   ptrace_syscall pid Nothing
   mr <- waitpid pid []
   case mr of
@@ -177,9 +179,11 @@ waitForSyscall pid state@TraceState{ inSyscall } = do
         Continued -> waitForSyscall pid state
         Signaled sig -> pure (state, Right $ SignalDeliveryStop sig)
         Stopped sig
-          | sig == (sigTRAP .|. 0x80) -> if
-            | inSyscall -> pure (state{ inSyscall = False }, Right $ SyscallStop SyscallExit)
-            | otherwise -> pure (state{ inSyscall = True }, Right $ SyscallStop SyscallEnter)
+          | sig == (sigTRAP .|. 0x80) -> case currentSyscall of
+              Just callAndArgs -> pure (state{ currentSyscall = Nothing }, Right $ SyscallStop (SyscallExit callAndArgs))
+              Nothing -> do
+                callAndArgs <- getEnteredSyscall pid
+                pure (state{ currentSyscall = Just callAndArgs }, Right $ SyscallStop (SyscallEnter callAndArgs))
           | otherwise -> waitForSyscall pid state
 
       return (newState, exitOrStop)
@@ -229,7 +233,7 @@ printSignal s =
 data Syscall
   = KnownSyscall KnownSyscall
   | UnknownSyscall !Word64
-  deriving (Show, Eq)
+  deriving (Eq, Ord, Show)
 
 
 data SyscallArgs = SyscallArgs
