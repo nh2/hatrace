@@ -81,7 +81,9 @@ traceForkExecvFullPath args = do
   childPid <- forkExecvWithPtrace args
   -- Set `PTRACE_O_TRACESYSGOOD` to make it easy for the tracer
   -- to distinguish normal traps from those caused by a syscall.
-  ptrace_setoptions childPid [TraceSysGood]
+  -- Set `PTRACE_O_EXITKILL` so that if we crash, everything below
+  -- also terminates.
+  ptrace_setoptions childPid [TraceSysGood, ExitKill]
   let loop state = do
         (newState, exitOrStop) <- waitForSyscall childPid state
         case exitOrStop of
