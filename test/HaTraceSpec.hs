@@ -11,10 +11,10 @@ spec =
     describe "traceCreateProcess" $ do
 
         it "does not crash for this echo process" $ do
-            traceForkExec ["echo", "hello"] `shouldReturn` ExitSuccess
+            traceForkExec ["/bin/echo", "hello"] `shouldReturn` ExitSuccess
 
         it "does not crash for this sleep process" $ do
-            traceForkExec ["sleep", "1"] `shouldReturn` ExitSuccess
+            traceForkExec ["/bin/sleep", "1"] `shouldReturn` ExitSuccess
 
         it "does not crash for hello.asm" $ do
             -- TODO Instead of compiling here, do it as a Cabal hook.

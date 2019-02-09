@@ -49,7 +49,10 @@ foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CIn
 -- Waits for the tracee process to have entered the STOPPED state.
 -- After waking up from the stop (as controlled by the tracer, that is,
 -- other functions you'll use after calling this one),
--- the tracee will execvp() the given program with arguments.
+-- the tracee will execv() the given program with arguments.
+--
+-- Since execv() is used, the first argument must be the /full path/
+-- to the executable.
 forkExecWithPtrace :: (HasCallStack) => [String] -> IO CPid
 forkExecWithPtrace args = do
     childPid <- withMany withFilePath args $ \cstrs -> do
