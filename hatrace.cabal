@@ -3,9 +3,9 @@ version:             0.1.0.0
 homepage:            https://github.com/NorfairKing/hatrace#readme
 license:             MIT
 license-file:        LICENSE
-author:              Tom Sydney Kerckhove
+author:              Tom Sydney Kerckhove, Niklas Hambüchen
 maintainer:          syd.kerckhove@gmail.com
-copyright:           Copyright: (c) 2016 Tom Sydney Kerckhove
+copyright:           Copyright: (c) 2016 Tom Sydney Kerckhove, Niklas Hambüchen
 category:            System
 build-type:          Simple
 extra-source-files:  README.md
