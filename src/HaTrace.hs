@@ -262,7 +262,7 @@ syscallNumberToName_x64_64 number =
 -- | Returns the syscall that we just entered after `waitForSyscall`.
 --
 -- PRE:
--- This must be called /only/ after `waitForSyscall` made us /enter/ a sycall;
+-- This must be called /only/ after `waitForSyscall` made us /enter/ a syscall;
 -- otherwise it may throw an `error` when trying to decode opcodes.
 getEnteredSyscall :: CPid -> IO (Syscall, SyscallArgs)
 getEnteredSyscall cpid = do
@@ -342,7 +342,7 @@ getEnteredSyscall cpid = do
 -- | Returns the result that we just exited after `waitForSyscall`.
 --
 -- PRE:
--- This must be called /only/ after `waitForSyscall` made us /exit/ a sycall;
+-- This must be called /only/ after `waitForSyscall` made us /exit/ a syscall;
 -- the returned values may be memory garbage.
 getExitedSyscallResult :: CPid -> IO Word64
 getExitedSyscallResult cpid = do
