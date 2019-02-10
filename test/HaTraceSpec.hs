@@ -1,5 +1,6 @@
 module HaTraceSpec where
 
+import           Data.Conduit
 import           System.Exit
 import           System.Process (callProcess)
 import           Test.Hspec
@@ -7,7 +8,7 @@ import           Test.Hspec
 import HaTrace
 
 spec :: Spec
-spec =
+spec = do
   describe "traceCreateProcess" $ do
 
     it "does not crash for this echo process" $ do
@@ -29,3 +30,10 @@ spec =
     it "does not hang when the traced program segfaults" $ do
       callProcess "make" ["--quiet", "example-programs/segfault"]
       traceForkProcess "example-programs/segfault" [] `shouldReturn` ExitFailure 139
+
+  describe "sourceTraceForkExecvFullPathWithSink" $ do
+
+    it "lets the process finish if the sink exits early" $ do
+      argv <- procToArgv "echo" ["hello"]
+      (exitCode, ()) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv (return ())
+      exitCode `shouldBe` ExitSuccess

@@ -6,11 +6,15 @@
 module HaTrace
   ( traceForkProcess
   , traceForkExecvFullPath
+  , sourceTraceForkExecvFullPathWithSink
   , procToArgv
   , forkExecvWithPtrace
   ) where
 
+import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.Bits ((.|.), shiftL, shiftR)
+import           Data.Conduit
+import qualified Data.Conduit.List as CL
 import           Data.List (find, genericLength)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
@@ -22,7 +26,7 @@ import           Foreign.Ptr (Ptr, wordPtrToPtr)
 import           GHC.Stack (HasCallStack)
 import           System.Directory (doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
-import           System.Linux.Ptrace (TracedProcess(..), peekBytes)
+import           System.Linux.Ptrace (TracedProcess(..), peekBytes, detach)
 import           System.Linux.Ptrace.Syscall
 import           System.Linux.Ptrace.Types (Regs(..))
 import           System.Linux.Ptrace.X86_64Regs (X86_64Regs(..))
@@ -32,21 +36,22 @@ import           System.Posix.Signals (Signal, sigTRAP, sigSTOP)
 import qualified System.Posix.Signals as Signals
 import           System.Posix.Types (CPid(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..))
+import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           HaTrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 
 
-waitpidForExactPidOrError :: (HasCallStack) => CPid -> IO ()
-waitpidForExactPidOrError pid = do
+waitpidForExactPidStopOrError :: (HasCallStack) => CPid -> IO ()
+waitpidForExactPidStopOrError pid = do
   mr <- waitpid pid []
   case mr of
-    Nothing -> error "forkExecvWithPtrace: BUG: no PID was returned by waitpid"
+    Nothing -> error "waitpidForExactPidStopOrError: BUG: no PID was returned by waitpid"
     Just (returnedPid, status)
-      | returnedPid /= pid -> error $ "forkExecvWithPtrace: BUG: returned PID != expected pid: " ++ show (returnedPid, pid)
+      | returnedPid /= pid -> error $ "waitpidForExactPidStopOrError: BUG: returned PID != expected pid: " ++ show (returnedPid, pid)
       | otherwise ->
         case status of
           Stopped sig | sig == sigSTOP -> return () -- all OK
-          _ -> error $ "forkExecvWithPtrace: BUG: unexpected status: " ++ show status
+          _ -> error $ "waitpidForExactPidStopOrError: BUG: unexpected status: " ++ show status
 
 
 foreign import ccall safe "fork_exec_with_ptrace" c_fork_exec_with_ptrace :: CInt -> Ptr (Ptr CChar) -> IO CPid
@@ -67,20 +72,14 @@ forkExecvWithPtrace args = do
       let argc = genericLength args
       throwErrnoIfMinus1 "fork_exec_with_ptrace" $ c_fork_exec_with_ptrace argc argsPtr
   -- Wait for the tracee to stop itself
-  waitpidForExactPidOrError childPid
+  waitpidForExactPidStopOrError childPid
   return childPid
 
 
--- TODO Make a version of this that takes a CreateProcess.
---      Note that `System.Linux.Ptrace.traceProcess` isn't good enough,
---      because it is racy:
---      It uses PTHREAD_ATTACH, which sends SIGSTOP to the started
---      process. By that time, the process may already have exited.
-
-traceForkExecvFullPath :: [String] -> IO ExitCode
-traceForkExecvFullPath args = do
-  childPid <- forkExecvWithPtrace args
-  ptrace_setoptions childPid
+sourceTraceForkExecvFullPathWithSink :: (MonadIO m) => [String] -> ConduitT (CPid, StopType) Void m a -> m (ExitCode, a)
+sourceTraceForkExecvFullPathWithSink args sink = do
+  childPid <- liftIO $ forkExecvWithPtrace args
+  liftIO $ ptrace_setoptions childPid
     -- Set `PTRACE_O_TRACESYSGOOD` to make it easy for the tracer
     -- to distinguish normal traps from those caused by a syscall.
     [ TraceSysGood
@@ -91,29 +90,58 @@ traceForkExecvFullPath args = do
     , TraceExec
     , TraceExit
     ]
+  exitCodeRef <- newIORef Nothing
   let loop state = do
-        (newState, exitOrStop) <- waitForSyscallOrSignal childPid state
+        (newState, exitOrStop) <- liftIO $ waitForSyscallOrSignal childPid state
         case exitOrStop of
-          Left exitCode -> pure exitCode
+          Left exitCode -> writeIORef exitCodeRef (Just exitCode)
           Right stopType -> do
-            case stopType of
-              SyscallStop (SyscallEnter (syscall, syscallArgs)) -> do
-                details <- case syscall of
-                  KnownSyscall Syscall_write -> do
-                    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = bufLen } = syscallArgs
-                    let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
-                    writeBs <- peekBytes (TracedProcess childPid) bufPtr (fromIntegral bufLen)
-                    return $ "write(" ++ show fd ++ ", " ++ show writeBs ++ ")"
-                  _ -> return ""
-                putStrLn $ "Entering syscall: " ++ show syscall
-                  ++ (if details /= "" then ", details: " ++ details else "")
-              SyscallStop (SyscallExit (syscall, _syscallArgs)) -> do
-                result <- getExitedSyscallResult childPid
-                putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
-              SignalDeliveryStop sig -> do
-                putStrLn $ "Got signal: " ++ prettySignal sig
+            yield (childPid, stopType)
             loop newState
-  loop initialTraceState
+  a <- runConduit $ loop initialTraceState .| sink
+  mExitCode <- readIORef exitCodeRef
+  finalExitCode <- liftIO $ case mExitCode of
+    Just e -> pure e
+    Nothing -> do
+      -- Detach from the process and let it run to an end.
+      detach (TracedProcess childPid)
+      waitpidResult <- waitpidFullStatus childPid []
+      case waitpidResult of
+        Nothing -> error "sourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
+        Just (_returnedPid, status, FullStatus fullStatus) -> case status of
+          Exited 0 -> pure ExitSuccess
+          _ -> pure $ ExitFailure (fromIntegral fullStatus)
+  return (finalExitCode, a)
+
+
+-- TODO Make a version of this that takes a CreateProcess.
+--      Note that `System.Linux.Ptrace.traceProcess` isn't good enough,
+--      because it is racy:
+--      It uses PTHREAD_ATTACH, which sends SIGSTOP to the started
+--      process. By that time, the process may already have exited.
+
+traceForkExecvFullPath :: [String] -> IO ExitCode
+traceForkExecvFullPath args = do
+  let printConduit = CL.mapM_ $ \(childPid, stopType) ->
+        liftIO $ case stopType of
+          SyscallStop (SyscallEnter (syscall, syscallArgs)) -> do
+            details <- case syscall of
+              KnownSyscall Syscall_write -> do
+                let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = bufLen } = syscallArgs
+                let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
+                writeBs <- peekBytes (TracedProcess childPid) bufPtr (fromIntegral bufLen)
+                return $ "write(" ++ show fd ++ ", " ++ show writeBs ++ ")"
+              _ -> return ""
+            putStrLn $ "Entering syscall: " ++ show syscall
+              ++ (if details /= "" then ", details: " ++ details else "")
+          SyscallStop (SyscallExit (syscall, _syscallArgs)) -> do
+            result <- getExitedSyscallResult childPid
+            putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
+          SignalDeliveryStop sig -> do
+            putStrLn $ "Got signal: " ++ prettySignal sig
+
+  (exitCode, ()) <- runConduit $ sourceTraceForkExecvFullPathWithSink args printConduit
+  return exitCode
 
 
 procToArgv :: (HasCallStack) => FilePath -> [String] -> IO [String]
