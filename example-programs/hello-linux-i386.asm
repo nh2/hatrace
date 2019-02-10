@@ -5,7 +5,7 @@
 ;exit(0)
 
 ;compile into a static executable with e.g.:
-;    nasm -f elf64 hello.asm && ld -e _start -o hello hello.o
+;    nasm -f elf64 hello-linux-i386.asm -o hello.o && ld -e _start -o hello hello.o
 
 ;Note this file uses the 32-bit legacy syscall API with `int 0x80`!
 ;This means it will use the 32-bit syscall numbers, not the x86_64 ones,

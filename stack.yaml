@@ -3,8 +3,8 @@ packages:
 - .
 extra-deps:
 - git: https://github.com/nh2/linux-ptrace
-  commit: 09ed13db745087176b9a76f755887ef84493ab91
-- git: git@github.com:GaloisInc/posix-waitpid.git
-  commit: 291b970f2ec6f57e6c65dde2432d7bf198f307c3
+  commit: 2e36842a4b1cd152de210638df29a513937e4ce3
+- git: https://github.com/nh2/posix-waitpid.git
+  commit: cb4b4d23e5344ff0f5ee607ae9862c20ab612ebb
 
 allow-newer: true

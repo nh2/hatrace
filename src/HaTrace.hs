@@ -30,7 +30,7 @@ import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP)
 import qualified System.Posix.Signals as Signals
 import           System.Posix.Types (CPid(..))
-import           System.Posix.Waitpid (waitpid, Status(..))
+import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..))
 
 import           HaTrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 
@@ -79,13 +79,16 @@ forkExecvWithPtrace args = do
 traceForkExecvFullPath :: [String] -> IO ExitCode
 traceForkExecvFullPath args = do
   childPid <- forkExecvWithPtrace args
-  -- Set `PTRACE_O_TRACESYSGOOD` to make it easy for the tracer
-  -- to distinguish normal traps from those caused by a syscall.
-  -- Set `PTRACE_O_EXITKILL` so that if we crash, everything below
-  -- also terminates.
-  ptrace_setoptions childPid [TraceSysGood, ExitKill]
+  ptrace_setoptions childPid
+    -- Set `PTRACE_O_TRACESYSGOOD` to make it easy for the tracer
+    -- to distinguish normal traps from those caused by a syscall.
+    [ TraceSysGood
+    -- Set `PTRACE_O_EXITKILL` so that if we crash, everything below
+    -- also terminates.
+    , ExitKill
+    ]
   let loop state = do
-        (newState, exitOrStop) <- waitForSyscall childPid state
+        (newState, exitOrStop) <- waitForSyscallOrSignal childPid state
         case exitOrStop of
           Left exitCode -> pure exitCode
           Right stopType -> do
@@ -155,6 +158,7 @@ data StopType
 -- We use this data structure to track it.
 data TraceState = TraceState
   { currentSyscall :: !(Maybe (Syscall, SyscallArgs)) -- ^ must be set to Nothingg if it's Just{} and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@
+  , inFlightSignal :: !(Maybe Signal)
   } deriving (Eq, Ord, Show)
 
 
@@ -162,31 +166,85 @@ initialTraceState :: TraceState
 initialTraceState =
   TraceState
     { currentSyscall = Nothing
+    , inFlightSignal = Nothing
     }
 
 
-waitForSyscall :: (HasCallStack) => CPid -> TraceState -> IO (TraceState, Either ExitCode StopType)
-waitForSyscall pid state@TraceState{ currentSyscall } = do
-  ptrace_syscall pid Nothing
-  mr <- waitpid pid []
+-- Observing ptrace events
+--
+-- As per `man 2 ptrace`:
+--
+--     If the tracer sets PTRACE_O_TRACE_* options, the tracee will enter ptrace-stops called PTRACE_EVENT stops.
+--
+--     PTRACE_EVENT stops are observed by the tracer as waitpid(2) returning with
+--     WIFSTOPPED(status), and WSTOPSIG(status) returns SIGTRAP. An additional bit
+--     is set in the higher byte of the status word: the value `status>>8` will be
+--
+--         (SIGTRAP | PTRACE_EVENT_foo << 8).
+--
+-- Note that this only happens for when `PTRACE_O_TRACE_*` was enabled
+-- for each corresponding event (`ptrace_setoptions` in Haskell).
+
+-- Exting children:
+--
+-- As per `man 2 ptrace`:
+--
+--     PTRACE_EVENT_EXIT
+--         Stop before exit (including death from exit_group(2)),
+--         signal death, or exit caused by execve(2) in a multi‐ threaded process.
+--         PTRACE_GETEVENTMSG returns the exit status. Registers can be examined
+--         (unlike when "real" exit happens).
+--         The tracee is still alive; it needs to be PTRACE_CONTed
+--         or PTRACE_DETACHed to finish exiting.
+
+
+-- TODO: Use these values from the `linux-ptrace` package instead.
+_PTRACE_EVENT_EXIT :: CInt
+_PTRACE_EVENT_EXIT = 6
+
+
+waitForSyscallOrSignal :: (HasCallStack) => CPid -> TraceState -> IO (TraceState, Either ExitCode StopType)
+waitForSyscallOrSignal pid state0@TraceState{ currentSyscall, inFlightSignal } = do
+  ptrace_syscall pid inFlightSignal
+  -- Mark that we've delivered the signal, if any.
+  let state = state0{ inFlightSignal = Nothing }
+  mr <- waitpidFullStatus pid []
   case mr of
-    Nothing -> error "waitForSyscall: no PID was returned by waitpid"
-    Just (_returnedPid, status) -> do -- TODO must we have different logic if any other pid (e.g. thread, child process of traced process) was returned?
+    Nothing -> error "waitForSyscallOrSignal: no PID was returned by waitpid"
+    Just (_returnedPid, status, FullStatus fullStatus) -> do -- TODO must we have different logic if any other pid (e.g. thread, child process of traced process) was returned?
       -- What event occurred; loop if not a syscall or signal
       (newState, exitOrStop) <- case status of
+        -- `Exited` means that the process chose to exit by itself,
+        -- as in calling `exit()` (as opposed to e.g. getting killed
+        -- by a signal).
         Exited i -> do
           case i of
             0 -> pure (state, Left ExitSuccess)
             _ -> pure (state, Left $ ExitFailure i)
-        Continued -> waitForSyscall pid state
-        Signaled sig -> pure (state, Right $ SignalDeliveryStop sig)
+        Continued -> waitForSyscallOrSignal pid state
+        -- Note that `Signaled` means that the process was *terminated*
+        -- by a signal.
+        -- Signals that come in without killing the process appear in
+        -- the `Stopped` case.
+        Signaled _sig -> pure (state, Left $ ExitFailure (fromIntegral fullStatus))
         Stopped sig
           | sig == (sigTRAP .|. 0x80) -> case currentSyscall of
               Just callAndArgs -> pure (state{ currentSyscall = Nothing }, Right $ SyscallStop (SyscallExit callAndArgs))
               Nothing -> do
                 callAndArgs <- getEnteredSyscall pid
                 pure (state{ currentSyscall = Just callAndArgs }, Right $ SyscallStop (SyscallEnter callAndArgs))
-          | otherwise -> waitForSyscall pid state
+          | sig == sigTRAP -> waitForSyscallOrSignal pid state
+          | otherwise -> do
+              -- A signal was sent towards the tracee.
+              -- We can intercept and filter it away, or deliver it.
+              -- If we want to deliver the signal to the tracee,
+              -- we need to `ptrace()` again, giving it that signal.
+
+              -- Put it into `inFlightSignal`, from which `waitForSyscallOrSignal`
+              -- will pick it up. If the caller wants to filter the signal
+              -- away, they can remove it from the state when invoking
+              -- waitForSyscallOrSignal next time.
+              return (state{ inFlightSignal = Just sig }, Right $ SignalDeliveryStop sig) -- continue waiting for syscall
 
       return (newState, exitOrStop)
 
@@ -264,10 +322,12 @@ syscallNumberToName_x64_64 number =
     Nothing -> UnknownSyscall number
 
 
--- | Returns the syscall that we just entered after `waitForSyscall`.
+-- | Returns the syscall that we just entered after
+-- `waitForSyscallOrSignal`.
 --
 -- PRE:
--- This must be called /only/ after `waitForSyscall` made us /enter/ a syscall;
+-- This must be called /only/ after `waitForSyscallOrSignal` made us
+-- /enter/ a syscall;
 -- otherwise it may throw an `error` when trying to decode opcodes.
 getEnteredSyscall :: CPid -> IO (Syscall, SyscallArgs)
 getEnteredSyscall cpid = do
@@ -344,10 +404,12 @@ getEnteredSyscall cpid = do
 -- * Linus Torvalds in https://lore.kernel.org/lkml/CA+55aFzcSVmdDj9Lh_gdbz1OzHyEm6ZrGPBDAJnywm2LF_eVyg@mail.gmail.com/
 
 
--- | Returns the result that we just exited after `waitForSyscall`.
+-- | Returns the result of a syscall that we just exited after
+-- `waitForSyscallOrSignal`.
 --
 -- PRE:
--- This must be called /only/ after `waitForSyscall` made us /exit/ a syscall;
+-- This must be called /only/ after `waitForSyscallOrSignal` made us
+-- /exit/ a syscall;
 -- the returned values may be memory garbage.
 getExitedSyscallResult :: CPid -> IO Word64
 getExitedSyscallResult cpid = do
