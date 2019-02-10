@@ -52,6 +52,7 @@ test-suite hatrace-test
   other-modules:       HatraceSpec
   build-depends:       base
                      , conduit
+                     , containers
                      , hatrace
                      , hspec
                      , process

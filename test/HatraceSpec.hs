@@ -2,6 +2,8 @@ module HatraceSpec where
 
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
+import           Data.Set (Set)
+import qualified Data.Set as Set
 import           System.Exit
 import           System.Process (callProcess)
 import           Test.Hspec
@@ -51,3 +53,26 @@ spec = do
         , KnownSyscall Syscall_write
         , KnownSyscall Syscall_exit
         ]
+
+  describe "program inspection" $ do
+
+    it "can point out that the difference in syscalls between atomic and non-atomic write is a rename" $ do
+
+      callProcess "make" ["--quiet", "example-programs-build/atomic-write"]
+      let getSyscallsSetFor :: [String] -> IO (Set Syscall)
+          getSyscallsSetFor args = do
+            argv <- procToArgv "example-programs-build/atomic-write" args
+            (exitCode, syscallDetails) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+            let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- syscallDetails ]
+            exitCode `shouldBe` ExitSuccess
+            return (Set.fromList syscalls)
+
+      -- Don't pick this it too large, because `atomic-write` writes only
+      -- 1 character per syscall, and ptrace() makes syscalls slow.
+      let numBytes = 100 :: Int
+      syscallsAtomic <- getSyscallsSetFor ["atomic", show numBytes, "example-programs-build/testfile"]
+      syscallsNonAtomic <- getSyscallsSetFor ["non-atomic", show numBytes, "example-programs-build/testfile"]
+
+      let differenceInSyscalls = syscallsAtomic `Set.difference` syscallsNonAtomic
+
+      differenceInSyscalls `shouldBe` Set.fromList [KnownSyscall Syscall_rename]
