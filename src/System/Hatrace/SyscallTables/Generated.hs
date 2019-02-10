@@ -2,14 +2,14 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 
-module HaTrace.SyscallTables.Generated where
+module System.Hatrace.SyscallTables.Generated where
 
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Language.Haskell.TH
 import           Data.Word (Word32, Word64)
 
-import           HaTrace.SyscallTables (readSyscallTable)
+import           System.Hatrace.SyscallTables (readSyscallTable)
 
 
 $(do

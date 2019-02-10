@@ -1,4 +1,4 @@
-module HaTrace.SyscallTables
+module System.Hatrace.SyscallTables
   ( parseSyscallTable
   , readSyscallTable
   ) where

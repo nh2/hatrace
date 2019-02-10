@@ -27,9 +27,9 @@ extra-source-files:
 library
   hs-source-dirs:      src
   c-sources:           cbits/fork-exec-ptrace.c
-  exposed-modules:     HaTrace
-                       HaTrace.SyscallTables
-                       HaTrace.SyscallTables.Generated
+  exposed-modules:     System.Hatrace
+                       System.Hatrace.SyscallTables
+                       System.Hatrace.SyscallTables.Generated
   build-depends:       base >= 4.7 && < 5
                      , bytestring
                      , conduit
@@ -49,7 +49,7 @@ test-suite hatrace-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
-  other-modules:       HaTraceSpec
+  other-modules:       HatraceSpec
   build-depends:       base
                      , conduit
                      , hatrace

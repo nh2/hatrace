@@ -3,7 +3,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module HaTrace
+module System.Hatrace
   ( traceForkProcess
   , traceForkExecvFullPath
   , sourceTraceForkExecvFullPathWithSink
@@ -45,7 +45,7 @@ import           System.Posix.Types (CPid(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..))
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
-import           HaTrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 
 
 waitpidForExactPidStopOrError :: (HasCallStack) => CPid -> IO ()

@@ -1,4 +1,4 @@
-module HaTraceSpec where
+module HatraceSpec where
 
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
@@ -6,7 +6,7 @@ import           System.Exit
 import           System.Process (callProcess)
 import           Test.Hspec
 
-import HaTrace
+import System.Hatrace
 
 spec :: Spec
 spec = do
