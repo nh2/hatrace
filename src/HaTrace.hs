@@ -9,7 +9,7 @@ module HaTrace
   , forkExecvWithPtrace
   ) where
 
-import           Data.Bits ((.|.))
+import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.List (find, genericLength)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
@@ -86,6 +86,9 @@ traceForkExecvFullPath args = do
     -- Set `PTRACE_O_EXITKILL` so that if we crash, everything below
     -- also terminates.
     , ExitKill
+    -- Sign up for the various PTRACE_EVENT_* events we want to handle below.
+    , TraceExec
+    , TraceExit
     ]
   let loop state = do
         (newState, exitOrStop) <- waitForSyscallOrSignal childPid state
@@ -233,7 +236,34 @@ waitForSyscallOrSignal pid state0@TraceState{ currentSyscall, inFlightSignal } =
               Nothing -> do
                 callAndArgs <- getEnteredSyscall pid
                 pure (state{ currentSyscall = Just callAndArgs }, Right $ SyscallStop (SyscallEnter callAndArgs))
-          | sig == sigTRAP -> waitForSyscallOrSignal pid state
+          | sig == sigTRAP -> if
+              -- For each special PTRACE_EVENT_* we want to catch here,
+              -- remember in needs to be enabled first via `ptrace_setoptions`.
+
+              -- Note: One way of many:
+              -- Technically we already know that it's `sigTRAP`,
+              -- from just above (`waitpidFullStatus` does the the same masking
+              -- we do here). `strace` just does an equivalent `switch` on
+              -- `status >> 16` to check the `PTRACE_EVENT_*` values).
+              -- We express it as `(status>>8) == (SIGTRAP | PTRACE_EVENT_foo << 8)`
+              -- because that's how the `ptrace` man page expresses this check.
+              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_EXIT `shiftL` 8)) -> do
+                  -- As discussed above, the child is still alive when
+                  -- this happens, and we need to PTRACE_CONT it
+                  -- so it can truly exit.
+                  -- This happens next time around this function is called.
+
+                  -- TODO: Right now we don't return anything except from
+                  --       syscall or program termination out of this function
+                  --       to the caller.
+                  --       In the future, we'd like to, so that the caller
+                  --       can intercept the program in these specific
+                  --       situations (straight before exit, straight after
+                  --       fork, and so on).
+                  --       This whole condition branch is an example for
+                  --       how to catch these situations.
+                  waitForSyscallOrSignal pid state
+              | otherwise -> waitForSyscallOrSignal pid state
           | otherwise -> do
               -- A signal was sent towards the tracee.
               -- We can intercept and filter it away, or deliver it.
