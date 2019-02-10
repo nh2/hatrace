@@ -213,6 +213,8 @@ waitForSyscallOrSignal pid state0@TraceState{ currentSyscall, inFlightSignal } =
   let state = state0{ inFlightSignal = Nothing }
   mr <- waitpidFullStatus pid []
   case mr of
+    -- This can occur when the caller incorrectly runs this on a non-traced process
+    -- that exited by itself.
     Nothing -> error "waitForSyscallOrSignal: no PID was returned by waitpid"
     Just (_returnedPid, status, FullStatus fullStatus) -> do -- TODO must we have different logic if any other pid (e.g. thread, child process of traced process) was returned?
       -- What event occurred; loop if not a syscall or signal
