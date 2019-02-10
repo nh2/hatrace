@@ -6,6 +6,7 @@
 module HaTrace
   ( traceForkProcess
   , traceForkExecvFullPath
+  , procToArgv
   , forkExecvWithPtrace
   ) where
 
@@ -115,17 +116,23 @@ traceForkExecvFullPath args = do
   loop initialTraceState
 
 
-traceForkProcess :: (HasCallStack) => FilePath -> [String] -> IO ExitCode
-traceForkProcess name args = do
+procToArgv :: (HasCallStack) => FilePath -> [String] -> IO [String]
+procToArgv name args = do
   exists <- doesFileExist name
   path <- if
     | exists -> pure name
     | otherwise -> do
-      mbExe <- findExecutable name
-      case mbExe of
-        Nothing -> die $ "Cannot find executable: " ++ name
-        Just path -> pure path
-  traceForkExecvFullPath (path:args)
+        mbExe <- findExecutable name
+        case mbExe of
+          Nothing -> die $ "Cannot find executable: " ++ name
+          Just path -> pure path
+  pure (path:args)
+
+
+traceForkProcess :: (HasCallStack) => FilePath -> [String] -> IO ExitCode
+traceForkProcess name args = do
+  argv <- procToArgv name args
+  traceForkExecvFullPath argv
 
 
 -- | The terminology in here is oriented on `man 2 ptrace`.
