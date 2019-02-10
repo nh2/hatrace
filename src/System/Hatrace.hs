@@ -14,6 +14,7 @@ module System.Hatrace
   , TraceState(..)
   , Syscall(..)
   , SyscallArgs(..)
+  , sendSignal
   -- * Re-exports
   , KnownSyscall(..)
   ) where
@@ -25,7 +26,7 @@ import qualified Data.Conduit.List as CL
 import           Data.List (find, genericLength)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
-import           Foreign.C.Error (throwErrnoIfMinus1)
+import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_)
 import           Foreign.C.Types (CInt(..), CChar(..))
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
@@ -491,3 +492,12 @@ getExitedSyscallResult cpid = do
   pure $ case regs of
     X86 X86Regs{ eax } -> fromIntegral eax
     X86_64 X86_64Regs{ rax } -> rax
+
+
+foreign import ccall safe "kill" c_kill :: CPid -> Signal -> IO CInt
+
+
+-- | Sends a signal to a PID the standard way (via @kill()@, not via ptrace).
+sendSignal :: CPid -> Signal -> IO ()
+sendSignal pid signal = do
+  throwErrnoIfMinus1_ "kill" $ c_kill pid signal
