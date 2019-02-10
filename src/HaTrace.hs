@@ -9,6 +9,13 @@ module HaTrace
   , sourceTraceForkExecvFullPathWithSink
   , procToArgv
   , forkExecvWithPtrace
+  , SyscallStopType(..)
+  , StopType(..)
+  , TraceState(..)
+  , Syscall(..)
+  , SyscallArgs(..)
+  -- * Re-exports
+  , KnownSyscall(..)
   ) where
 
 import           Control.Monad.IO.Class (MonadIO, liftIO)

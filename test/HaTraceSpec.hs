@@ -1,6 +1,7 @@
 module HaTraceSpec where
 
 import           Data.Conduit
+import qualified Data.Conduit.List as CL
 import           System.Exit
 import           System.Process (callProcess)
 import           Test.Hspec
@@ -37,3 +38,16 @@ spec = do
       argv <- procToArgv "echo" ["hello"]
       (exitCode, ()) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv (return ())
       exitCode `shouldBe` ExitSuccess
+
+    it "allows obtaining all syscalls as a list for hello.asm" $ do
+      callProcess "make" ["--quiet", "example-programs/hello-linux-x86_64"]
+      argv <- procToArgv "example-programs/hello-linux-x86_64" []
+      (exitCode, syscallDetails) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+
+      let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- syscallDetails ]
+      exitCode `shouldBe` ExitSuccess
+      syscalls `shouldBe`
+        [ KnownSyscall Syscall_execve
+        , KnownSyscall Syscall_write
+        , KnownSyscall Syscall_exit
+        ]
