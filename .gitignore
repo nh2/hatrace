@@ -23,4 +23,4 @@ cabal.project.local~
 
 example-programs-build/
 ghcid.txt
-*.sublime-*
+*.sublime-workspace

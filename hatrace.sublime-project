@@ -1,0 +1,16 @@
+{
+  "folders":
+  [
+    {
+      "path": ".",
+      "folder_exclude_patterns":
+      [
+        ".*", // hidden dirs
+      ],
+    },
+  ],
+  "settings":
+  {
+    "ensure_newline_at_eof_on_save": true,
+  },
+}
