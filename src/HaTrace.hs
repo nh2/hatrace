@@ -104,7 +104,7 @@ traceForkExecvFullPath args = do
                 result <- getExitedSyscallResult childPid
                 putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
               SignalDeliveryStop sig -> do
-                printSignal sig
+                putStrLn $ "Got signal: " ++ prettySignal sig
             loop newState
   loop initialTraceState
 
@@ -191,12 +191,11 @@ waitForSyscall pid state@TraceState{ currentSyscall } = do
       return (newState, exitOrStop)
 
 
-printSignal :: Signal -> IO ()
-printSignal s =
+prettySignal :: Signal -> String
+prettySignal s =
   case find (\(a, _, _) -> s == a) ls of
-    Nothing -> putStrLn $ "Unknown signal: " ++ show s
-    Just (_, n1, n2) -> do
-      print (n1, n2)
+    Nothing -> "Unknown signal: " ++ show s
+    Just (_, n1, n2) -> show (n1, n2)
   where
   ls :: [(Signal, String, String)]
   ls =
