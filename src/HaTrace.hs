@@ -224,7 +224,7 @@ waitForSyscallOrSignal pid state0@TraceState{ currentSyscall, inFlightSignal } =
           case i of
             0 -> pure (state, Left ExitSuccess)
             _ -> pure (state, Left $ ExitFailure i)
-        Continued -> waitForSyscallOrSignal pid state
+        Continued -> error $ "waitForSyscallOrSignal: BUG: Continued status appeared even though WCONTINUE was not passed to waitpid"
         -- Note that `Signaled` means that the process was *terminated*
         -- by a signal.
         -- Signals that come in without killing the process appear in
