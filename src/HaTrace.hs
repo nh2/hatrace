@@ -121,7 +121,7 @@ traceForkProcess name args = do
   path <- if
     | exists -> pure name
     | otherwise -> do
-      mbExe <- findExecutable "echo"
+      mbExe <- findExecutable name
       case mbExe of
         Nothing -> die $ "Cannot find executable: " ++ name
         Just path -> pure path
