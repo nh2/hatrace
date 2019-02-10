@@ -1,5 +1,8 @@
 name:                hatrace
 version:             0.1.0.0
+synopsis:            strace as a library; inspect and intercept system calls
+description:         Gives programmatic access to recording, analysing and intercepting
+                     a given program's system calls, signals, and memory contents.
 homepage:            https://gitlab.com/Norfair/hatrace#readme
 license:             MIT
 license-file:        LICENSE
@@ -8,12 +11,18 @@ maintainer:          syd.kerckhove@gmail.com
 copyright:           Copyright: (c) 2016 Tom Sydney Kerckhove, Niklas Hambüchen
 category:            System
 build-type:          Simple
-extra-source-files:  README.md
 cabal-version:       >=1.10
 
 extra-source-files:
-  syscalls-table/tables/syscalls-i386
+  README.md
+  Makefile
+  stack.yaml
+  example-programs/*.asm
+  -- Cabal cannot currently include them with a wildcard,
+  -- see https://github.com/haskell/cabal/issues/5883,
+  -- so we must currently enumerate them manually.
   syscalls-table/tables/syscalls-x86_64
+  syscalls-table/tables/syscalls-i386
 
 library
   hs-source-dirs:      src
