@@ -108,17 +108,17 @@ spec = do
                   awaitForever $ \(pid, _) -> liftIO $ sendSignal pid sigTERM
 
                 -- Filters away everything that's not a write syscall,
-                -- and after 3 writes, SIGTERMs the process.
-                killAfterThirdWriteConduit =
+                -- and at the onset of the 4th write, SIGTERMs the process.
+                killAt4thWriteConduit =
                   CC.filter isWrite .| (CC.drop 3 >> killConduit)
 
             _ <- runConduit $
-              sourceTraceForkExecvFullPathWithSink argv killAfterThirdWriteConduit
+              sourceTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
 
             return ()
 
       -- Writing the file non-atomically should result in truncated contents.
-      -- There should be 3 'a's in the file, as we killed after 3 writes
+      -- There should be 3 'a's in the file, as we killed after 3 writes.
       killAfter3Writes "non-atomic"
       fileContents <- BS.readFile targetFile
       fileContents `shouldBe` "aaa"
