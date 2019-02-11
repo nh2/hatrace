@@ -9,8 +9,9 @@ module System.Hatrace
   , sourceTraceForkExecvFullPathWithSink
   , procToArgv
   , forkExecvWithPtrace
+  , printSyscallOrSignalNameConduit
   , SyscallStopType(..)
-  , StopType(..)
+  , TraceEvent(..)
   , TraceState(..)
   , Syscall(..)
   , SyscallArgs(..)
@@ -24,6 +25,7 @@ import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.List (find, genericLength)
+import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_)
@@ -34,8 +36,10 @@ import           Foreign.Ptr (Ptr, wordPtrToPtr)
 import           GHC.Stack (HasCallStack)
 import           System.Directory (doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
+import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
 import           System.Linux.Ptrace (TracedProcess(..), peekBytes, detach)
-import           System.Linux.Ptrace.Syscall
+import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
+import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
 import           System.Linux.Ptrace.Types (Regs(..))
 import           System.Linux.Ptrace.X86_64Regs (X86_64Regs(..))
 import           System.Linux.Ptrace.X86Regs (X86Regs(..))
@@ -48,6 +52,42 @@ import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 
+-- | Adds some prefix (separated by @: @) to the error location of an `IOError`.
+addIOErrorPrefix :: String -> IO a -> IO a
+addIOErrorPrefix prefix action = do
+  modifyIOError (\e -> ioeSetLocation e (prefix ++ ": " ++ ioeGetLocation e)) action
+
+
+-- | We generally use this function to make it more obvious via what kind of
+-- invocation of ptrace() it failed, because it's very easy to get
+-- ptrace calls wrong. Without this, you'd just get
+--
+-- > ptrace: does not exist (No such process)
+--
+-- for pretty much any wrong invocation.
+-- By adding the location to the exception, these
+-- details show up in our test suite and our users' error messages.
+--
+-- Note that where possible, use a single invocation of this function
+-- instead of nested invocations, so that the exception has to be caught
+-- and rethrown as few times as possible.
+annotatePtrace :: String -> IO a -> IO a
+annotatePtrace = addIOErrorPrefix
+
+
+-- | Wrapper around `Ptrace.System.ptrace_syscall` that prints its name in
+-- `IOError`s it raises.
+ptrace_syscall :: CPid -> Maybe Signal -> IO ()
+ptrace_syscall pid mbSignal =
+  annotatePtrace "ptrace_syscall" $
+    Ptrace.Syscall.ptrace_syscall pid mbSignal
+
+
+-- | Wrapper around `Ptrace.System.detach` that prints its name in
+-- `IOError`s it raises.
+ptrace_detach :: CPid -> IO ()
+ptrace_detach pid = annotatePtrace "ptrace_detach" $ detach (TracedProcess pid)
+
 
 waitpidForExactPidStopOrError :: (HasCallStack) => CPid -> IO ()
 waitpidForExactPidStopOrError pid = do
@@ -59,6 +99,7 @@ waitpidForExactPidStopOrError pid = do
       | otherwise ->
         case status of
           Stopped sig | sig == sigSTOP -> return () -- all OK
+          -- TODO: This seems to happen when we ourselves (the tracer) are being `strace`d. Investigate.
           _ -> error $ "waitpidForExactPidStopOrError: BUG: unexpected status: " ++ show status
 
 
@@ -84,41 +125,89 @@ forkExecvWithPtrace args = do
   return childPid
 
 
-sourceTraceForkExecvFullPathWithSink :: (MonadIO m) => [String] -> ConduitT (CPid, StopType) Void m a -> m (ExitCode, a)
+sourceTraceForkExecvFullPathWithSink :: (MonadIO m) => [String] -> ConduitT (CPid, TraceEvent) Void m a -> m (ExitCode, a)
 sourceTraceForkExecvFullPathWithSink args sink = do
   childPid <- liftIO $ forkExecvWithPtrace args
-  liftIO $ ptrace_setoptions childPid
+  -- Now the child is stopped. Set options, then start it.
+  liftIO $ annotatePtrace "ptrace_setoptions" $ ptrace_setoptions childPid
     -- Set `PTRACE_O_TRACESYSGOOD` to make it easy for the tracer
     -- to distinguish normal traps from those caused by a syscall.
     [ TraceSysGood
     -- Set `PTRACE_O_EXITKILL` so that if we crash, everything below
     -- also terminates.
     , ExitKill
+    -- Tracing child processes
+    , TraceClone
+    , TraceFork
+    , TraceVFork
     -- Sign up for the various PTRACE_EVENT_* events we want to handle below.
     , TraceExec
     , TraceExit
     ]
-  exitCodeRef <- newIORef Nothing
+  -- Start the child.
+  liftIO $ ptrace_syscall childPid Nothing
+
+  exitCodeRef <- newIORef (Nothing :: Maybe ExitCode)
   let loop state = do
-        (newState, exitOrStop) <- liftIO $ waitForSyscallOrSignal childPid state
-        case exitOrStop of
-          Left exitCode -> writeIORef exitCodeRef (Just exitCode)
-          Right stopType -> do
-            yield (childPid, stopType)
+        (newState, (returnedPid, event)) <- liftIO $ waitForTraceEvent state
+
+        yield (returnedPid, event)
+
+        -- Cases in which we have to restart the tracee
+        -- (by calling `ptrace_syscall` again).
+        liftIO $ case event of
+          SyscallStop _enterOrExit -> do
+            -- Tell the process to continue into / out of the syscall,
+            -- and generate another event at the next syscall or signal.
+            ptrace_syscall returnedPid Nothing
+          PTRACE_EVENT_Stop _ptraceEvent -> do
+            -- Continue past the event.
+            ptrace_syscall returnedPid Nothing
+            -- As discussed in the docs of PTRACE_EVENT_EXIT, even for that
+            -- event the child is still alive and needs to be restarted
+            -- before it truly exits.
+          SignalDeliveryStop sig -> do
+            -- Deliver the signal
+            ptrace_syscall returnedPid (Just sig)
+          Death _exitCode -> return () -- can't restart it, it's dead
+
+        -- The program runs.
+        -- It is in this section of the code where the traced program actually runs:
+        -- between `ptrace_syscall` and `waitForTraceEvent`'s waitpid()' returning
+        -- (this statement is of course only accurate for single-threaded programs
+        -- without child processes; otherwise multiple things can be running).
+
+        case event of
+          Death exitCode | returnedPid == childPid -> do
+            -- Our direct child exited, we are done.
+            -- TODO: Figure out how to handle the situation that our
+            --       direct child exits when children are still alive
+            --       (because it didn't reap them or because they
+            --       double-forked to daemonize).
+            writeIORef exitCodeRef (Just exitCode)
+            -- no further `loop`ing
+          _ -> do
             loop newState
+
   a <- runConduit $ loop initialTraceState .| sink
   mExitCode <- readIORef exitCodeRef
   finalExitCode <- liftIO $ case mExitCode of
     Just e -> pure e
     Nothing -> do
-      -- Detach from the process and let it run to an end.
-      detach (TracedProcess childPid)
-      waitpidResult <- waitpidFullStatus childPid []
-      case waitpidResult of
+      -- If the child hasn't exited yet, Detach from it and let it run
+      -- to an end.
+      -- TODO: We probably have to do that for all tracees.
+      preDetachWaitpidResult <- waitpid childPid []
+      case preDetachWaitpidResult of
         Nothing -> error "sourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
-        Just (_returnedPid, status, FullStatus fullStatus) -> case status of
-          Exited 0 -> pure ExitSuccess
-          _ -> pure $ ExitFailure (fromIntegral fullStatus)
+        Just{} -> do
+          ptrace_detach childPid
+          waitpidResult <- waitpidFullStatus childPid []
+          case waitpidResult of
+            Nothing -> error "sourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
+            Just (_returnedPid, status, FullStatus fullStatus) -> case status of
+              Exited 0 -> pure ExitSuccess
+              _ -> pure $ ExitFailure (fromIntegral fullStatus)
   return (finalExitCode, a)
 
 
@@ -130,8 +219,8 @@ sourceTraceForkExecvFullPathWithSink args sink = do
 
 traceForkExecvFullPath :: [String] -> IO ExitCode
 traceForkExecvFullPath args = do
-  let printConduit = CL.mapM_ $ \(childPid, stopType) ->
-        liftIO $ case stopType of
+  let printConduit = CL.mapM_ $ \(childPid, event) ->
+        liftIO $ case event of
           SyscallStop (SyscallEnter (syscall, syscallArgs)) -> do
             details <- case syscall of
               KnownSyscall Syscall_write -> do
@@ -145,11 +234,31 @@ traceForkExecvFullPath args = do
           SyscallStop (SyscallExit (syscall, _syscallArgs)) -> do
             result <- getExitedSyscallResult childPid
             putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
+          PTRACE_EVENT_Stop ptraceEvent -> do
+            putStrLn $ "Got event: " ++ show ptraceEvent
           SignalDeliveryStop sig -> do
             putStrLn $ "Got signal: " ++ prettySignal sig
+          Death fullStatus -> do
+            putStrLn $ "Process exited with status: " ++ show fullStatus
 
   (exitCode, ()) <- runConduit $ sourceTraceForkExecvFullPathWithSink args printConduit
   return exitCode
+
+
+-- | Passes through all syscalls and signals that come by,
+-- printing them in short form.
+printSyscallOrSignalNameConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, TraceEvent) m ()
+printSyscallOrSignalNameConduit = CL.iterM $ \(childPid, event) -> liftIO $ do
+
+  let message = case event of
+        SyscallStop stop -> case stop of
+          SyscallEnter (syscall, _syscallArgs) -> "Entering syscall: " ++ show syscall
+          SyscallExit (syscall, _syscallArgs) -> "Exited syscall: " ++ show syscall
+        SignalDeliveryStop sig -> "Got signal: " ++ prettySignal sig
+        PTRACE_EVENT_Stop ptraceEvent -> "Got event: " ++ show ptraceEvent
+        Death fullStatus -> "Process exited with status: " ++ show fullStatus
+
+  putStrLn $ show [childPid] ++ " " ++ message
 
 
 procToArgv :: (HasCallStack) => FilePath -> [String] -> IO [String]
@@ -178,10 +287,25 @@ data SyscallStopType
   deriving (Eq, Ord, Show)
 
 
+data PTRACE_EVENT
+  = PTRACE_EVENT_VFORK
+  | PTRACE_EVENT_FORK
+  | PTRACE_EVENT_CLONE
+  | PTRACE_EVENT_VFORK_DONE
+  | PTRACE_EVENT_EXEC
+  | PTRACE_EVENT_EXIT
+  | PTRACE_EVENT_STOP
+  | PTRACE_EVENT_SECCOMP
+  | PTRACE_EVENT_OTHER -- TODO make this carry the number
+  deriving (Eq, Ord, Show)
+
+
 -- | The terminology in here is oriented on `man 2 ptrace`.
-data StopType
+data TraceEvent
   = SyscallStop SyscallStopType
+  | PTRACE_EVENT_Stop PTRACE_EVENT -- TODO change this to carry detail information with each event, e.g. what pid was clone()d
   | SignalDeliveryStop Signal
+  | Death ExitCode -- ^ @exit()@ or killed by signal; means the PID has vanished from the system now
   deriving (Eq, Ord, Show)
 
 
@@ -203,16 +327,14 @@ data StopType
 --
 -- We use this data structure to track it.
 data TraceState = TraceState
-  { currentSyscall :: !(Maybe (Syscall, SyscallArgs)) -- ^ must be set to Nothingg if it's Just{} and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@
-  , inFlightSignal :: !(Maybe Signal)
+  { currentSyscalls :: !(Map CPid (Syscall, SyscallArgs)) -- ^ must be removed from the map if (it's present and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@)
   } deriving (Eq, Ord, Show)
 
 
 initialTraceState :: TraceState
 initialTraceState =
   TraceState
-    { currentSyscall = Nothing
-    , inFlightSignal = Nothing
+    { currentSyscalls = Map.empty
     }
 
 
@@ -245,42 +367,57 @@ initialTraceState =
 
 
 -- TODO: Use these values from the `linux-ptrace` package instead.
+
+
+_PTRACE_EVENT_FORK :: CInt
+_PTRACE_EVENT_FORK = 1
+
+_PTRACE_EVENT_VFORK :: CInt
+_PTRACE_EVENT_VFORK = 2
+
+_PTRACE_EVENT_CLONE :: CInt
+_PTRACE_EVENT_CLONE = 3
+
+_PTRACE_EVENT_EXEC :: CInt
+_PTRACE_EVENT_EXEC = 4
+
+_PTRACE_EVENT_VFORKDONE :: CInt
+_PTRACE_EVENT_VFORKDONE = 5
+
 _PTRACE_EVENT_EXIT :: CInt
 _PTRACE_EVENT_EXIT = 6
 
 
-waitForSyscallOrSignal :: (HasCallStack) => CPid -> TraceState -> IO (TraceState, Either ExitCode StopType)
-waitForSyscallOrSignal pid state0@TraceState{ currentSyscall, inFlightSignal } = do
-  ptrace_syscall pid inFlightSignal
-  -- Mark that we've delivered the signal, if any.
-  let state = state0{ inFlightSignal = Nothing }
-  mr <- waitpidFullStatus pid []
+waitForTraceEvent :: (HasCallStack) => TraceState -> IO (TraceState, (CPid, TraceEvent))
+waitForTraceEvent state@TraceState{ currentSyscalls } = do
+
+  mr <- waitpidFullStatus (-1) []
   case mr of
     -- This can occur when the caller incorrectly runs this on a non-traced process
     -- that exited by itself.
-    Nothing -> error "waitForSyscallOrSignal: no PID was returned by waitpid"
-    Just (_returnedPid, status, FullStatus fullStatus) -> do -- TODO must we have different logic if any other pid (e.g. thread, child process of traced process) was returned?
+    Nothing -> error "waitForTraceEvent: no PID was returned by waitpid"
+    Just (returnedPid, status, FullStatus fullStatus) -> do -- TODO must we have different logic if any other pid (e.g. thread, child process of traced process) was returned?
       -- What event occurred; loop if not a syscall or signal
-      (newState, exitOrStop) <- case status of
+      (newState, event) <- case status of
         -- `Exited` means that the process chose to exit by itself,
         -- as in calling `exit()` (as opposed to e.g. getting killed
         -- by a signal).
         Exited i -> do
           case i of
-            0 -> pure (state, Left ExitSuccess)
-            _ -> pure (state, Left $ ExitFailure i)
-        Continued -> error $ "waitForSyscallOrSignal: BUG: Continued status appeared even though WCONTINUE was not passed to waitpid"
+            0 -> pure (state, Death $ ExitSuccess)
+            _ -> pure (state, Death $ ExitFailure i)
+        Continued -> error $ "waitForTraceEvent: BUG: Continued status appeared even though WCONTINUE was not passed to waitpid"
         -- Note that `Signaled` means that the process was *terminated*
         -- by a signal.
         -- Signals that come in without killing the process appear in
         -- the `Stopped` case.
-        Signaled _sig -> pure (state, Left $ ExitFailure (fromIntegral fullStatus))
+        Signaled _sig -> pure (state, Death $ ExitFailure (fromIntegral fullStatus))
         Stopped sig
-          | sig == (sigTRAP .|. 0x80) -> case currentSyscall of
-              Just callAndArgs -> pure (state{ currentSyscall = Nothing }, Right $ SyscallStop (SyscallExit callAndArgs))
+          | sig == (sigTRAP .|. 0x80) -> case Map.lookup returnedPid currentSyscalls of
+              Just callAndArgs -> pure (state{ currentSyscalls = Map.delete returnedPid currentSyscalls }, SyscallStop (SyscallExit callAndArgs))
               Nothing -> do
-                callAndArgs <- getEnteredSyscall pid
-                pure (state{ currentSyscall = Just callAndArgs }, Right $ SyscallStop (SyscallEnter callAndArgs))
+                callAndArgs <- getEnteredSyscall returnedPid
+                pure (state{ currentSyscalls = Map.insert returnedPid callAndArgs currentSyscalls }, SyscallStop (SyscallEnter callAndArgs))
           | sig == sigTRAP -> if
               -- For each special PTRACE_EVENT_* we want to catch here,
               -- remember in needs to be enabled first via `ptrace_setoptions`.
@@ -294,34 +431,26 @@ waitForSyscallOrSignal pid state0@TraceState{ currentSyscall, inFlightSignal } =
               -- because that's how the `ptrace` man page expresses this check.
               | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_EXIT `shiftL` 8)) -> do
                   -- As discussed above, the child is still alive when
-                  -- this happens, and we need to PTRACE_CONT it
-                  -- so it can truly exit.
-                  -- This happens next time around this function is called.
+                  -- this happens, and termination will only occur after
+                  -- the child is restarted with ptrace().
+                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_EXIT)
+              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_CLONE `shiftL` 8)) -> do
+                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_CLONE)
+              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_FORK `shiftL` 8)) -> do
+                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_FORK)
+              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_VFORK `shiftL` 8)) -> do
+                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_VFORK)
+              | otherwise -> do
+                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_OTHER)
 
-                  -- TODO: Right now we don't return anything except from
-                  --       syscall or program termination out of this function
-                  --       to the caller.
-                  --       In the future, we'd like to, so that the caller
-                  --       can intercept the program in these specific
-                  --       situations (straight before exit, straight after
-                  --       fork, and so on).
-                  --       This whole condition branch is an example for
-                  --       how to catch these situations.
-                  waitForSyscallOrSignal pid state
-              | otherwise -> waitForSyscallOrSignal pid state
           | otherwise -> do
               -- A signal was sent towards the tracee.
-              -- We can intercept and filter it away, or deliver it.
-              -- If we want to deliver the signal to the tracee,
-              -- we need to `ptrace()` again, giving it that signal.
+              -- We tell the caller about it, so they can deliver it or
+              -- filter it away (chosen by whether they pass it to their
+              -- next `ptrace_*` (e.g. `ptrace_syscall`) invocation.
+              return (state, SignalDeliveryStop sig) -- continue waiting for syscall
 
-              -- Put it into `inFlightSignal`, from which `waitForSyscallOrSignal`
-              -- will pick it up. If the caller wants to filter the signal
-              -- away, they can remove it from the state when invoking
-              -- waitForSyscallOrSignal next time.
-              return (state{ inFlightSignal = Just sig }, Right $ SignalDeliveryStop sig) -- continue waiting for syscall
-
-      return (newState, exitOrStop)
+      return (newState, (returnedPid, event))
 
 
 prettySignal :: Signal -> String
@@ -398,15 +527,15 @@ syscallNumberToName_x64_64 number =
 
 
 -- | Returns the syscall that we just entered after
--- `waitForSyscallOrSignal`.
+-- `waitForTraceEvent`.
 --
 -- PRE:
--- This must be called /only/ after `waitForSyscallOrSignal` made us
+-- This must be called /only/ after `waitForTraceEvent` made us
 -- /enter/ a syscall;
 -- otherwise it may throw an `error` when trying to decode opcodes.
 getEnteredSyscall :: CPid -> IO (Syscall, SyscallArgs)
 getEnteredSyscall cpid = do
-  regs <- ptrace_getregs cpid
+  regs <- annotatePtrace "getEnteredSyscall: ptrace_getregs" $ ptrace_getregs cpid
   case regs of
     X86 regs_i386@X86Regs{ orig_eax } -> do
       let syscall = syscallNumberToName_i386 orig_eax
@@ -480,15 +609,15 @@ getEnteredSyscall cpid = do
 
 
 -- | Returns the result of a syscall that we just exited after
--- `waitForSyscallOrSignal`.
+-- `waitForTraceEvent`.
 --
 -- PRE:
--- This must be called /only/ after `waitForSyscallOrSignal` made us
+-- This must be called /only/ after `waitForTraceEvent` made us
 -- /exit/ a syscall;
 -- the returned values may be memory garbage.
 getExitedSyscallResult :: CPid -> IO Word64
 getExitedSyscallResult cpid = do
-  regs <- ptrace_getregs cpid
+  regs <- annotatePtrace "getExitedSyscallResult: ptrace_getregs" $ ptrace_getregs cpid
   pure $ case regs of
     X86 X86Regs{ eax } -> fromIntegral eax
     X86_64 X86_64Regs{ rax } -> rax

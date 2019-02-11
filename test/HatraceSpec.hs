@@ -61,6 +61,29 @@ spec = do
         , KnownSyscall Syscall_exit
         ]
 
+    describe "subprocess tracing" $ do
+
+      it "can trace 'bash -c ./hello'" $ do
+        callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
+        -- We must run *something* (e.g. `true &&`) before the program,
+        -- otherwise bash will just execve() and not fork() at all, in which case
+        -- this test wouldn't actually test tracing into subprocesses.
+        argv <- procToArgv "bash" ["-c", "true && example-programs-build/hello-linux-x86_64"]
+        (exitCode, syscallDetails) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+        let cloneWriteSyscalls =
+              [ syscall
+              | (_pid, SyscallStop (SyscallEnter (KnownSyscall syscall, _args))) <- syscallDetails
+              , syscall `elem` [Syscall_clone, Syscall_write]
+              ]
+        exitCode `shouldBe` ExitSuccess
+        cloneWriteSyscalls `shouldBe` [Syscall_clone, Syscall_write]
+
+      it "can handle the situation that the child doesn't wait for its children" $ do
+        pendingWith "implement test with simple C program that doens't wait for a child"
+
+      it "can handle the situation that a child's child double-forks" $ do
+        pendingWith "implement test with simple C program that has a child double-fork"
+
   describe "program inspection" $ do
 
     it "can point out that the difference in syscalls between atomic and non-atomic write is a rename" $ do
@@ -129,3 +152,6 @@ spec = do
       killAfter3Writes "atomic"
       targetExists <- doesFileExist targetFile
       targetExists `shouldBe` False
+
+    it "can be used to check whether programs handle EINTR correctly" $ do
+      pendingWith "implement test that uses PTRACE_INTERRUPT in every syscall"
