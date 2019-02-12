@@ -24,7 +24,7 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
-import           Data.List (find, genericLength)
+import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
@@ -455,12 +455,14 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
 
 prettySignal :: Signal -> String
 prettySignal s =
-  case find (\(a, _, _) -> s == a) ls of
+  case Map.lookup s signalMap of
     Nothing -> "Unknown signal: " ++ show s
-    Just (_, _longName, shortName) -> shortName
-  where
-  ls :: [(Signal, String, String)]
-  ls =
+    Just (_longName, shortName) -> shortName
+
+
+signalMap :: Map Signal (String, String)
+signalMap =
+  Map.fromList $ map (\(s, long, short) -> (s, (long, short))) $
     [ (Signals.nullSignal, "nullSignal", "NULL")
     , (Signals.internalAbort, "internalAbort", "ABRT")
     , (Signals.realTimeAlarm, "realTimeAlarm", "ALRM")
