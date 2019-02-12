@@ -457,7 +457,7 @@ prettySignal :: Signal -> String
 prettySignal s =
   case find (\(a, _, _) -> s == a) ls of
     Nothing -> "Unknown signal: " ++ show s
-    Just (_, n1, n2) -> show (n1, n2)
+    Just (_, _longName, shortName) -> shortName
   where
   ls :: [(Signal, String, String)]
   ls =
