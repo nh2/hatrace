@@ -351,6 +351,21 @@ formatDetailedSyscallEnter = \case
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
 
+formatDetailedSyscallExit :: DetailedSyscallExit -> String
+formatDetailedSyscallExit = \case
+
+  DetailedSyscallExit_write
+    SyscallExitDetails_write{ enterDetail = SyscallEnterDetails_write{ fd, bufContents, count }, writtenCount } ->
+      "write(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ") = " ++ show writtenCount
+
+  DetailedSyscallExit_read
+    SyscallExitDetails_read{ enterDetail = SyscallEnterDetails_read{ fd, count }, readCount, bufContents } ->
+      "read(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ") = " ++ show readCount
+
+  DetailedSyscallExit_unimplemented syscall syscallArgs result ->
+    "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
+
+
 getFormattedSyscallEnterDetails :: Syscall -> SyscallArgs -> CPid -> IO String
 getFormattedSyscallEnterDetails syscall syscallArgs pid =
   case syscall of
@@ -359,6 +374,16 @@ getFormattedSyscallEnterDetails syscall syscallArgs pid =
     KnownSyscall knownSyscall -> do
       detailed <- getSyscallEnterDetails knownSyscall syscallArgs pid
       pure $ formatDetailedSyscallEnter detailed
+
+
+getFormattedSyscallExitDetails :: Syscall -> SyscallArgs -> CPid -> IO String
+getFormattedSyscallExitDetails syscall syscallArgs pid =
+  case syscall of
+    UnknownSyscall number -> do
+      pure $ "unknown_syscall_" ++ show number ++ "(" ++ show syscallArgs ++ ")"
+    KnownSyscall knownSyscall -> do
+      detailed <- getSyscallExitDetails knownSyscall syscallArgs pid
+      pure $ formatDetailedSyscallExit detailed
 
 
 -- TODO Make a version of this that takes a CreateProcess.
@@ -387,9 +412,10 @@ printSyscallOrSignalNameConduit = CL.mapM_ $ \(pid, event) -> do
         putStrLn $ "Entering syscall: " ++ show syscall
           ++ (if formatted /= "" then ", details: " ++ formatted else "")
 
-      SyscallExit (syscall, _syscallArgs) -> do
-        result <- getExitedSyscallResult pid
-        putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
+      SyscallExit (syscall, syscallArgs) -> do
+        formatted <- getFormattedSyscallExitDetails syscall syscallArgs pid
+        putStrLn $ "Exited syscall: " ++ show syscall
+          ++ (if formatted /= "" then ", details: " ++ formatted else "")
 
     PTRACE_EVENT_Stop ptraceEvent -> do
       putStrLn $ "Got event: " ++ show ptraceEvent
