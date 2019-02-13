@@ -368,47 +368,36 @@ getFormattedSyscallEnterDetails syscall syscallArgs pid =
 
 traceForkExecvFullPath :: [String] -> IO ExitCode
 traceForkExecvFullPath args = do
-  let printConduit = CL.mapM_ $ \(pid, event) ->
-        liftIO $ case event of
-
-          SyscallStop enterOrExit -> case enterOrExit of
-
-            SyscallEnter (syscall, syscallArgs) -> do
-              formatted <- getFormattedSyscallEnterDetails syscall syscallArgs pid
-              putStrLn $ "Entering syscall: " ++ show syscall
-                ++ (if formatted /= "" then ", details: " ++ formatted else "")
-
-            SyscallExit (syscall, _syscallArgs) -> do
-              result <- getExitedSyscallResult pid
-              putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
-
-          PTRACE_EVENT_Stop ptraceEvent -> do
-            putStrLn $ "Got event: " ++ show ptraceEvent
-
-          SignalDeliveryStop sig -> do
-            putStrLn $ "Got signal: " ++ prettySignal sig
-
-          Death fullStatus -> do
-            putStrLn $ "Process exited with status: " ++ show fullStatus
-
-  (exitCode, ()) <- runConduit $ sourceTraceForkExecvFullPathWithSink args printConduit
+  (exitCode, ()) <- runConduit $
+    sourceTraceForkExecvFullPathWithSink args (printSyscallOrSignalNameConduit .| CL.sinkNull)
   return exitCode
 
 
 -- | Passes through all syscalls and signals that come by,
--- printing them in short form.
+-- printing them, including details where available.
 printSyscallOrSignalNameConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, TraceEvent) m ()
-printSyscallOrSignalNameConduit = CL.iterM $ \(childPid, event) -> liftIO $ do
+printSyscallOrSignalNameConduit = CL.mapM_ $ \(pid, event) -> do
+  liftIO $ case event of
 
-  let message = case event of
-        SyscallStop stop -> case stop of
-          SyscallEnter (syscall, _syscallArgs) -> "Entering syscall: " ++ show syscall
-          SyscallExit (syscall, _syscallArgs) -> "Exited syscall: " ++ show syscall
-        SignalDeliveryStop sig -> "Got signal: " ++ prettySignal sig
-        PTRACE_EVENT_Stop ptraceEvent -> "Got event: " ++ show ptraceEvent
-        Death fullStatus -> "Process exited with status: " ++ show fullStatus
+    SyscallStop enterOrExit -> case enterOrExit of
 
-  putStrLn $ show [childPid] ++ " " ++ message
+      SyscallEnter (syscall, syscallArgs) -> do
+        formatted <- getFormattedSyscallEnterDetails syscall syscallArgs pid
+        putStrLn $ "Entering syscall: " ++ show syscall
+          ++ (if formatted /= "" then ", details: " ++ formatted else "")
+
+      SyscallExit (syscall, _syscallArgs) -> do
+        result <- getExitedSyscallResult pid
+        putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
+
+    PTRACE_EVENT_Stop ptraceEvent -> do
+      putStrLn $ "Got event: " ++ show ptraceEvent
+
+    SignalDeliveryStop sig -> do
+      putStrLn $ "Got signal: " ++ prettySignal sig
+
+    Death fullStatus -> do
+      putStrLn $ "Process exited with status: " ++ show fullStatus
 
 
 procToArgv :: (HasCallStack) => FilePath -> [String] -> IO [String]
