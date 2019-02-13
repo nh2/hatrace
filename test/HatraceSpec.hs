@@ -24,9 +24,6 @@ spec = do
     it "does not crash for this echo process" $ do
       traceForkProcess "echo" ["hello"] `shouldReturn` ExitSuccess
 
-    it "does not crash for this sleep process" $ do
-      traceForkProcess "sleep" ["1"] `shouldReturn` ExitSuccess
-
     -- TODO Instead of compiling things here with `make`, do it as a Cabal hook.
 
     it "does not crash for hello.asm with 32-bit API" $ do
