@@ -51,9 +51,9 @@ spec = do
     it "allows obtaining all syscalls as a list for hello.asm" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
       argv <- procToArgv "example-programs-build/hello-linux-x86_64" []
-      (exitCode, syscallDetails) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+      (exitCode, events) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
 
-      let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- syscallDetails ]
+      let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
       exitCode `shouldBe` ExitSuccess
       syscalls `shouldBe`
         [ KnownSyscall Syscall_execve
@@ -69,10 +69,10 @@ spec = do
         -- otherwise bash will just execve() and not fork() at all, in which case
         -- this test wouldn't actually test tracing into subprocesses.
         argv <- procToArgv "bash" ["-c", "true && example-programs-build/hello-linux-x86_64"]
-        (exitCode, syscallDetails) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+        (exitCode, events) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
         let cloneWriteSyscalls =
               [ syscall
-              | (_pid, SyscallStop (SyscallEnter (KnownSyscall syscall, _args))) <- syscallDetails
+              | (_pid, SyscallStop (SyscallEnter (KnownSyscall syscall, _args))) <- events
               , syscall `elem` [Syscall_clone, Syscall_write]
               ]
         exitCode `shouldBe` ExitSuccess
@@ -92,8 +92,8 @@ spec = do
       let getSyscallsSetFor :: [String] -> IO (Set Syscall)
           getSyscallsSetFor args = do
             argv <- procToArgv "example-programs-build/atomic-write" args
-            (exitCode, syscallDetails) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
-            let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- syscallDetails ]
+            (exitCode, events) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+            let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
             exitCode `shouldBe` ExitSuccess
             return (Set.fromList syscalls)
 
