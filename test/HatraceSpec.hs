@@ -1,3 +1,5 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module HatraceSpec where
@@ -152,3 +154,26 @@ spec = do
 
     it "can be used to check whether programs handle EINTR correctly" $ do
       pendingWith "implement test that uses PTRACE_INTERRUPT in every syscall"
+
+  describe "per-syscall tests" $ do
+
+    describe "read" $ do
+
+      it "has the right output for 'echo hello | cat'" $ do
+        argv <- procToArgv "bash" ["-c", "echo hello | cat > /dev/null"]
+        (exitCode, events) <-
+          runConduit $ sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        let stdinReads =
+              [ bufContents
+              | (_pid
+                , DetailedSyscallExit_read
+                    SyscallExitDetails_read
+                      { enterDetail = SyscallEnterDetails_read{ fd = 0 }
+                      , bufContents
+                      }
+                ) <- events
+              ]
+        exitCode `shouldBe` ExitSuccess
+        -- Concatenate because there may be short reads and retries.
+        BS.concat stdinReads `shouldBe` "hello\n"

@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE NamedFieldPuns #-}
@@ -10,6 +11,15 @@ module System.Hatrace
   , procToArgv
   , forkExecvWithPtrace
   , printSyscallOrSignalNameConduit
+  , SyscallEnterDetails_write(..)
+  , SyscallExitDetails_write(..)
+  , SyscallEnterDetails_read(..)
+  , SyscallExitDetails_read(..)
+  , DetailedSyscallEnter(..)
+  , DetailedSyscallExit(..)
+  , getSyscallEnterDetails
+  , syscallEnterDetailsOnlyConduit
+  , syscallExitDetailsOnlyConduit
   , SyscallStopType(..)
   , TraceEvent(..)
   , TraceState(..)
@@ -22,6 +32,7 @@ module System.Hatrace
 
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.Bits ((.|.), shiftL, shiftR)
+import           Data.ByteString (ByteString)
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.List (genericLength)
@@ -29,7 +40,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_)
-import           Foreign.C.Types (CInt(..), CChar(..))
+import           Foreign.C.Types (CInt(..), CChar(..), CSize(..))
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, wordPtrToPtr)
@@ -211,6 +222,144 @@ sourceTraceForkExecvFullPathWithSink args sink = do
   return (finalExitCode, a)
 
 
+-- * Syscall details
+--
+-- __Note:__ The data types below use @DuplicateRecordFields@.
+--
+-- Users should also use @DuplicateRecordFields@ to avoid getting
+-- @Ambiguous occurrence@ errors.
+
+
+data SyscallEnterDetails_write = SyscallEnterDetails_write
+  { fd :: CInt
+  , buf :: Ptr Void
+  , count :: CSize
+  -- Peeked details
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_write = SyscallExitDetails_write
+  { enterDetail :: SyscallEnterDetails_write
+  , writtenCount :: CSize
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallEnterDetails_read = SyscallEnterDetails_read
+  { fd :: CInt
+  , buf :: Ptr Void
+  , count :: CSize
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_read = SyscallExitDetails_read
+  { enterDetail :: SyscallEnterDetails_read
+  -- Peeked details
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data DetailedSyscallEnter
+  = DetailedSyscallEnter_write SyscallEnterDetails_write
+  | DetailedSyscallEnter_read SyscallEnterDetails_read
+  | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
+  deriving (Eq, Ord, Show)
+
+
+data DetailedSyscallExit
+  = DetailedSyscallExit_write SyscallExitDetails_write
+  | DetailedSyscallExit_read SyscallExitDetails_read
+  | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
+  deriving (Eq, Ord, Show)
+
+
+getSyscallEnterDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallEnter
+getSyscallEnterDetails syscall syscallArgs pid = case syscall of
+  Syscall_write -> do
+    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
+    let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
+    bufContents <- peekBytes (TracedProcess pid) bufPtr (fromIntegral count)
+    pure $ DetailedSyscallEnter_write $ SyscallEnterDetails_write
+      { fd = fromIntegral fd
+      , buf = bufPtr
+      , count = fromIntegral count
+      , bufContents
+      }
+  Syscall_read -> do
+    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
+    let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
+    pure $ DetailedSyscallEnter_read $ SyscallEnterDetails_read
+      { fd = fromIntegral fd
+      , buf = bufPtr
+      , count = fromIntegral count
+      }
+  _ -> pure $
+    DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
+
+
+getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallExit
+getSyscallExitDetails knownSyscall syscallArgs pid = do
+  detailedSyscallEnter <- getSyscallEnterDetails knownSyscall syscallArgs pid
+  result <- getExitedSyscallResult pid
+
+  case detailedSyscallEnter of
+
+    DetailedSyscallEnter_write
+      enterDetail@SyscallEnterDetails_write{} -> do
+        pure $ DetailedSyscallExit_write $
+          SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
+
+    DetailedSyscallEnter_read
+      enterDetail@SyscallEnterDetails_read{ buf } -> do
+        bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+        pure $ DetailedSyscallExit_read $
+          SyscallExitDetails_read{ enterDetail, bufContents }
+
+    DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
+      pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+
+
+syscallEnterDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallEnter) m ()
+syscallEnterDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
+  SyscallStop (SyscallEnter (KnownSyscall syscall, syscallArgs)) -> do
+    detailedSyscallEnter <- liftIO $ getSyscallEnterDetails syscall syscallArgs pid
+    yield (pid, detailedSyscallEnter)
+  _ -> return () -- skip
+
+
+syscallExitDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallExit) m ()
+syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
+  SyscallStop (SyscallExit (KnownSyscall syscall, syscallArgs)) -> do
+    detailedSyscallEnter <- liftIO $ getSyscallExitDetails syscall syscallArgs pid
+    yield (pid, detailedSyscallEnter)
+  _ -> return () -- skip
+
+
+formatDetailedSyscallEnter :: DetailedSyscallEnter -> String
+formatDetailedSyscallEnter = \case
+
+  DetailedSyscallEnter_write
+    SyscallEnterDetails_write{ fd, bufContents, count } ->
+      "write(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ")"
+
+  DetailedSyscallEnter_read
+    SyscallEnterDetails_read{ fd, count } ->
+      "read(" ++ show fd ++ ", void *buf, " ++ show count ++ ")"
+
+  DetailedSyscallEnter_unimplemented syscall syscallArgs ->
+    "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
+
+
+getFormattedSyscallEnterDetails :: Syscall -> SyscallArgs -> CPid -> IO String
+getFormattedSyscallEnterDetails syscall syscallArgs pid =
+  case syscall of
+    UnknownSyscall number -> do
+      pure $ "unknown_syscall_" ++ show number ++ "(" ++ show syscallArgs ++ ")"
+    KnownSyscall knownSyscall -> do
+      detailed <- getSyscallEnterDetails knownSyscall syscallArgs pid
+      pure $ formatDetailedSyscallEnter detailed
+
+
 -- TODO Make a version of this that takes a CreateProcess.
 --      Note that `System.Linux.Ptrace.traceProcess` isn't good enough,
 --      because it is racy:
@@ -221,23 +370,24 @@ traceForkExecvFullPath :: [String] -> IO ExitCode
 traceForkExecvFullPath args = do
   let printConduit = CL.mapM_ $ \(pid, event) ->
         liftIO $ case event of
-          SyscallStop (SyscallEnter (syscall, syscallArgs)) -> do
-            details <- case syscall of
-              KnownSyscall Syscall_write -> do
-                let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = bufLen } = syscallArgs
-                let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
-                writeBs <- peekBytes (TracedProcess pid) bufPtr (fromIntegral bufLen)
-                return $ "write(" ++ show fd ++ ", " ++ show writeBs ++ ")"
-              _ -> return ""
-            putStrLn $ "Entering syscall: " ++ show syscall
-              ++ (if details /= "" then ", details: " ++ details else "")
-          SyscallStop (SyscallExit (syscall, _syscallArgs)) -> do
-            result <- getExitedSyscallResult pid
-            putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
+
+          SyscallStop enterOrExit -> case enterOrExit of
+
+            SyscallEnter (syscall, syscallArgs) -> do
+              formatted <- getFormattedSyscallEnterDetails syscall syscallArgs pid
+              putStrLn $ "Entering syscall: " ++ show syscall
+                ++ (if formatted /= "" then ", details: " ++ formatted else "")
+
+            SyscallExit (syscall, _syscallArgs) -> do
+              result <- getExitedSyscallResult pid
+              putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
+
           PTRACE_EVENT_Stop ptraceEvent -> do
             putStrLn $ "Got event: " ++ show ptraceEvent
+
           SignalDeliveryStop sig -> do
             putStrLn $ "Got signal: " ++ prettySignal sig
+
           Death fullStatus -> do
             putStrLn $ "Process exited with status: " ++ show fullStatus
 
@@ -283,7 +433,7 @@ traceForkProcess name args = do
 -- | The terminology in here is oriented on `man 2 ptrace`.
 data SyscallStopType
   = SyscallEnter (Syscall, SyscallArgs)
-  | SyscallExit (Syscall, SyscallArgs)
+  | SyscallExit (Syscall, SyscallArgs) -- ^ contains the args from when the syscall was entered
   deriving (Eq, Ord, Show)
 
 
