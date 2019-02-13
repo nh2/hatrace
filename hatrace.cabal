@@ -28,6 +28,7 @@ library
   hs-source-dirs:      src
   c-sources:           cbits/fork-exec-ptrace.c
   exposed-modules:     System.Hatrace
+                       System.Hatrace.Main
                        System.Hatrace.SyscallTables
                        System.Hatrace.SyscallTables.Generated
   build-depends:       base >= 4.7 && < 5
@@ -36,6 +37,7 @@ library
                      , containers
                      , directory
                      , linux-ptrace
+                     , optparse-applicative
                      , posix-waitpid
                      , process
                      , template-haskell
@@ -43,6 +45,14 @@ library
                      , unix
                      , unliftio
   ghc-options:         -Wall
+  default-language:    Haskell2010
+
+executable hatrace
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  build-depends:       base
+                     , hatrace
+  ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
 test-suite hatrace-test
