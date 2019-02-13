@@ -219,20 +219,20 @@ sourceTraceForkExecvFullPathWithSink args sink = do
 
 traceForkExecvFullPath :: [String] -> IO ExitCode
 traceForkExecvFullPath args = do
-  let printConduit = CL.mapM_ $ \(childPid, event) ->
+  let printConduit = CL.mapM_ $ \(pid, event) ->
         liftIO $ case event of
           SyscallStop (SyscallEnter (syscall, syscallArgs)) -> do
             details <- case syscall of
               KnownSyscall Syscall_write -> do
                 let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = bufLen } = syscallArgs
                 let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
-                writeBs <- peekBytes (TracedProcess childPid) bufPtr (fromIntegral bufLen)
+                writeBs <- peekBytes (TracedProcess pid) bufPtr (fromIntegral bufLen)
                 return $ "write(" ++ show fd ++ ", " ++ show writeBs ++ ")"
               _ -> return ""
             putStrLn $ "Entering syscall: " ++ show syscall
               ++ (if details /= "" then ", details: " ++ details else "")
           SyscallStop (SyscallExit (syscall, _syscallArgs)) -> do
-            result <- getExitedSyscallResult childPid
+            result <- getExitedSyscallResult pid
             putStrLn $ "Exited syscall: " ++ show syscall ++ ", result: " ++ show result
           PTRACE_EVENT_Stop ptraceEvent -> do
             putStrLn $ "Got event: " ++ show ptraceEvent
