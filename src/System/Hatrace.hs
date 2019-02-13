@@ -255,6 +255,7 @@ data SyscallEnterDetails_read = SyscallEnterDetails_read
 data SyscallExitDetails_read = SyscallExitDetails_read
   { enterDetail :: SyscallEnterDetails_read
   -- Peeked details
+  , readCount :: CSize
   , bufContents :: ByteString
   } deriving (Eq, Ord, Show)
 
@@ -313,7 +314,7 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
       enterDetail@SyscallEnterDetails_read{ buf } -> do
         bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
         pure $ DetailedSyscallExit_read $
-          SyscallExitDetails_read{ enterDetail, bufContents }
+          SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
 
     DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
