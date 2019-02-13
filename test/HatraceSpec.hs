@@ -32,6 +32,10 @@ spec = do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-i386-elf64"]
       traceForkProcess "example-programs-build/hello-linux-i386-elf64" [] `shouldReturn` ExitSuccess
 
+    it "does not crash for hello.asm real 32-bit" $ do
+      callProcess "make" ["--quiet", "example-programs-build/hello-linux-i386"]
+      traceForkProcess "example-programs-build/hello-linux-i386" [] `shouldReturn` ExitSuccess
+
     it "does not crash for hello.asm with 64-bit API" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
       traceForkProcess "example-programs-build/hello-linux-x86_64" [] `shouldReturn` ExitSuccess
