@@ -26,6 +26,7 @@ module System.Hatrace
   , Syscall(..)
   , SyscallArgs(..)
   , sendSignal
+  , doesProcessHaveChildren
   -- * Re-exports
   , KnownSyscall(..)
   ) where
@@ -39,8 +40,9 @@ import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
-import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_)
+import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, eCHILD)
 import           Foreign.C.Types (CInt(..), CChar(..), CSize(..))
+import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, wordPtrToPtr)
@@ -798,3 +800,30 @@ foreign import ccall safe "kill" c_kill :: CPid -> Signal -> IO CInt
 sendSignal :: CPid -> Signal -> IO ()
 sendSignal pid signal = do
   throwErrnoIfMinus1_ "kill" $ c_kill pid signal
+
+
+-- TODO: Get thise via .hsc or `posix-waitpid` instead
+
+_WNOHANG :: CInt
+_WNOHANG = 1
+
+_WUNTRACED :: CInt
+_WUNTRACED = 2
+
+_WCONTINUED :: CInt
+_WCONTINUED = 8
+
+
+-- TODO: Don't rely on this symbol of the posix-waitpid package
+foreign import ccall safe "SystemPosixWaitpid_waitpid" c_waitpid :: CPid -> Ptr CInt -> Ptr CInt -> CInt -> IO CPid
+
+
+doesProcessHaveChildren :: IO Bool
+doesProcessHaveChildren = alloca $ \resultPtr -> alloca $ \fullStatusPtr -> do
+  -- Non-blocking request, and we want to know of *any* child's existence.
+  let options = _WNOHANG .|. _WUNTRACED .|. _WCONTINUED
+  res <- c_waitpid (-1) resultPtr fullStatusPtr options
+  errno <- getErrno
+  if res == -1 && errno == eCHILD
+    then return False
+    else const True <$> throwErrnoIfMinus1 "c_waitpid" (pure res)

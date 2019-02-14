@@ -4,6 +4,7 @@
 
 module HatraceSpec where
 
+import           Control.Monad (when)
 import           Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as BS
 import           Data.Conduit
@@ -19,8 +20,24 @@ import           Test.Hspec
 
 import System.Hatrace
 
+
+-- | Assertion we run before each test to ensure no leftover child processes
+-- that could affect subsequent tests.
+--
+-- This is obviously not effective if tests were to run in parallel.
+assertNoChildren :: IO ()
+assertNoChildren = do
+  hasChildren <- doesProcessHaveChildren
+  when hasChildren $ do
+    error "You have children you don't know of, probably from a previous test"
+
+
 spec :: Spec
-spec = do
+spec = before_ assertNoChildren $ do
+  -- Note we use `before_` instead of `after_` above because apparently,
+  -- hspec swallows test failure messages if after the test faulure the
+  -- `after_` action fails as well, showing only the latter's message.
+
   describe "traceCreateProcess" $ do
 
     it "does not crash for this echo process" $ do
