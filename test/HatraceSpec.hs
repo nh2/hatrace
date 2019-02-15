@@ -14,6 +14,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
+import           System.Posix.Files (getFileStatus, fileSize)
 import           System.Posix.Signals (sigTERM)
 import           System.Process (callProcess)
 import           Test.Hspec
@@ -172,6 +173,61 @@ spec = before_ assertNoChildren $ do
       killAfter3Writes "atomic"
       targetExists <- doesFileExist targetFile
       targetExists `shouldBe` False
+
+    it "can be used to check whether GHC writes truncated object files or executables" $ do
+
+      let targetFile = "example-programs-build/haskell-hello"
+      let program = "ghc"
+      let args =
+            [ "--make"
+            -- TODO enable this once we kill when writing the desired files (see TODO below)
+            -- , "-fforce-recomp"
+            , "-outputdir", "example-programs-build/"
+            , "example-programs/Hello.hs"
+            , "-o", targetFile
+            ]
+
+      let runGhcMake :: IO ()
+          runGhcMake = do
+            argv <- procToArgv program args
+
+            let isWrite (_pid, SyscallStop (SyscallEnter (KnownSyscall Syscall_write, _args))) = True
+                isWrite _ = False
+
+            -- We have to use SIGTERM and cannot use SIGKILL as of writing,
+            -- because Hatrace cannot yet handle the case where the tracee
+            -- instantly goes away: we get in that case:
+            --     ptrace: does not exist (No such process)
+            -- For showing the below, SIGTERM is good enough for now.
+            let killConduit =
+                  -- TODO: Actually do the kill
+                  -- awaitForever $ \(pid, _) -> liftIO $ sendSignal pid sigTERM
+                  return ()
+
+                -- Filters away everything that's not a write syscall,
+                -- and at the onset of the 4th write, SIGTERMs the process.
+                killAt4thWriteConduit =
+                  -- TODO: Do the kill after some writes on `.o` files, not just any FDs
+                  CC.filter isWrite .| (CC.drop 3 >> killConduit)
+
+            (exitCode, ()) <- runConduit $
+              sourceTraceForkExecvFullPathWithSink argv (printSyscallOrSignalNameConduit .| killAt4thWriteConduit)
+            exitCode `shouldBe` ExitSuccess
+
+      -- Delete potentially leftover files from previous build
+      callProcess "rm" ["-f", targetFile, "example-programs-build/Main.hi", "example-programs-build/Main.o"]
+
+      -- Build normally, record output file size
+      callProcess program args
+      expectedSize <- fileSize <$> getFileStatus targetFile
+
+      -- Build with kill
+      runGhcMake
+
+      -- Build normally, check if results are normal
+      callProcess program args
+      rebuildSize <- fileSize <$> getFileStatus targetFile
+      rebuildSize `shouldBe` expectedSize
 
     it "can be used to check whether programs handle EINTR correctly" $ do
       pendingWith "implement test that uses PTRACE_INTERRUPT in every syscall"
