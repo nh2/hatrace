@@ -411,22 +411,22 @@ printSyscallOrSignalNameConduit = CL.mapM_ $ \(pid, event) -> do
 
       SyscallEnter (syscall, syscallArgs) -> do
         formatted <- getFormattedSyscallEnterDetails syscall syscallArgs pid
-        putStrLn $ "Entering syscall: " ++ show syscall
+        putStrLn $ show [pid] ++ " Entering syscall: " ++ show syscall
           ++ (if formatted /= "" then ", details: " ++ formatted else "")
 
       SyscallExit (syscall, syscallArgs) -> do
         formatted <- getFormattedSyscallExitDetails syscall syscallArgs pid
-        putStrLn $ "Exited syscall: " ++ show syscall
+        putStrLn $ show [pid] ++ " Exited syscall: " ++ show syscall
           ++ (if formatted /= "" then ", details: " ++ formatted else "")
 
     PTRACE_EVENT_Stop ptraceEvent -> do
-      putStrLn $ "Got event: " ++ show ptraceEvent
+      putStrLn $ show [pid] ++ " Got event: " ++ show ptraceEvent
 
     SignalDeliveryStop sig -> do
-      putStrLn $ "Got signal: " ++ prettySignal sig
+      putStrLn $ show [pid] ++ " Got signal: " ++ prettySignal sig
 
     Death fullStatus -> do
-      putStrLn $ "Process exited with status: " ++ show fullStatus
+      putStrLn $ show [pid] ++ " Process exited with status: " ++ show fullStatus
 
 
 procToArgv :: (HasCallStack) => FilePath -> [String] -> IO [String]
