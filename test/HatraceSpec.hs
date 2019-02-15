@@ -105,6 +105,9 @@ spec = before_ assertNoChildren $ do
       it "can handle the situation that a child's child double-forks" $ do
         pendingWith "implement test with simple C program that has a child double-fork"
 
+      it "can handle Group-stop in multithreaded programs" $ do
+        pendingWith "implement test with simple C program that uses multiple threads"
+
   describe "program inspection" $ do
 
     it "can point out that the difference in syscalls between atomic and non-atomic write is a rename" $ do
