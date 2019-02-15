@@ -46,7 +46,7 @@ import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, wordPtrToPtr)
-import           GHC.Stack (HasCallStack)
+import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
 import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
@@ -90,9 +90,17 @@ annotatePtrace = addIOErrorPrefix
 
 -- | Wrapper around `Ptrace.System.ptrace_syscall` that prints its name in
 -- `IOError`s it raises.
-ptrace_syscall :: CPid -> Maybe Signal -> IO ()
-ptrace_syscall pid mbSignal =
-  annotatePtrace "ptrace_syscall" $
+ptrace_syscall :: (HasCallStack) => CPid -> Maybe Signal -> IO ()
+ptrace_syscall pid mbSignal = do
+  let debugCallLocation = if
+        | False -> -- set this to True to get caller source code lines for failures
+            -- Put the top-most call stack caller into the error message
+            concat
+              [ prettySrcLoc srcLoc
+              | (_, srcLoc):_ <- [getCallStack callStack]
+              ] ++ ": "
+        | otherwise -> ""
+  annotatePtrace (debugCallLocation ++ "ptrace_syscall") $
     Ptrace.Syscall.ptrace_syscall pid mbSignal
 
 
