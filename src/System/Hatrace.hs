@@ -40,8 +40,8 @@ import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
-import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, eCHILD)
-import           Foreign.C.Types (CInt(..), CChar(..), CSize(..))
+import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
+import           Foreign.C.Types (CInt(..), CLong(..), CChar(..), CSize(..))
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
@@ -57,7 +57,7 @@ import           System.Linux.Ptrace.Types (Regs(..))
 import           System.Linux.Ptrace.X86_64Regs (X86_64Regs(..))
 import           System.Linux.Ptrace.X86Regs (X86Regs(..))
 import           System.Posix.Internals (withFilePath)
-import           System.Posix.Signals (Signal, sigTRAP, sigSTOP)
+import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
 import qualified System.Posix.Signals as Signals
 import           System.Posix.Types (CPid(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..))
@@ -187,6 +187,9 @@ sourceTraceForkExecvFullPathWithSink args sink = do
             -- As discussed in the docs of PTRACE_EVENT_EXIT, even for that
             -- event the child is still alive and needs to be restarted
             -- before it truly exits.
+          GroupStop sig -> do
+            -- Continue past the event.
+            ptrace_syscall returnedPid (Just sig)
           SignalDeliveryStop sig -> do
             -- Deliver the signal
             ptrace_syscall returnedPid (Just sig)
@@ -430,6 +433,9 @@ printSyscallOrSignalNameConduit = CL.mapM_ $ \(pid, event) -> do
     PTRACE_EVENT_Stop ptraceEvent -> do
       putStrLn $ show [pid] ++ " Got event: " ++ show ptraceEvent
 
+    GroupStop sig -> do
+      putStrLn $ show [pid] ++ " Got group stop: " ++ prettySignal sig
+
     SignalDeliveryStop sig -> do
       putStrLn $ show [pid] ++ " Got signal: " ++ prettySignal sig
 
@@ -480,6 +486,7 @@ data PTRACE_EVENT
 data TraceEvent
   = SyscallStop SyscallStopType
   | PTRACE_EVENT_Stop PTRACE_EVENT -- TODO change this to carry detail information with each event, e.g. what pid was clone()d
+  | GroupStop Signal
   | SignalDeliveryStop Signal
   | Death ExitCode -- ^ @exit()@ or killed by signal; means the PID has vanished from the system now
   deriving (Eq, Ord, Show)
@@ -563,6 +570,37 @@ _PTRACE_EVENT_VFORKDONE = 5
 _PTRACE_EVENT_EXIT :: CInt
 _PTRACE_EVENT_EXIT = 6
 
+_PTRACE_EVENT_STOP :: CInt
+_PTRACE_EVENT_STOP = 128
+
+
+-- TODO Don't rely on this symbol from the `linux-ptrace` package
+foreign import ccall safe "ptrace" c_ptrace :: CInt -> CPid -> Ptr a -> Ptr b -> IO CLong
+
+
+-- TODO: Use this values from the `linux-ptrace` package instead.
+_PTRACE_GETSIGINFO :: CInt
+_PTRACE_GETSIGINFO = 0x4202
+
+
+-- | Uses @PTRACE_GETSIGINFO@ to check whether the current stop is a
+-- group-stop.
+--
+-- PRE:
+-- Must be called only if we're in a ptrace-stop and the signal is one
+-- of SIGSTOP, SIGTSTP, SIGTTIN, or SIGTTOU (as per @man 2 ptrace@).
+ptrace_GETSIGINFO_isGroupStop :: CPid -> IO Bool
+ptrace_GETSIGINFO_isGroupStop pid = alloca $ \ptr -> do
+  -- From `man 2 ptrace`:
+  --     ptrace(PTRACE_GETSIGINFO, pid, 0, &siginfo)
+  --     ...
+  --     If PTRACE_GETSIGINFO fails with EINVAL,
+  --     then it is definitely a group-stop.
+  resetErrno -- ptrace() requires setting errno to 0 before the call
+  res <- c_ptrace _PTRACE_GETSIGINFO pid (wordPtrToPtr 0) (ptr :: Ptr ())
+  errno <- getErrno
+  pure $ res == -1 && errno == eINVAL
+
 
 waitForTraceEvent :: (HasCallStack) => TraceState -> IO (TraceState, (CPid, TraceEvent))
 waitForTraceEvent state@TraceState{ currentSyscalls } = do
@@ -589,6 +627,15 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
         -- the `Stopped` case.
         Signaled _sig -> pure (state, Death $ ExitFailure (fromIntegral fullStatus))
         Stopped sig -> do
+          let signalAllowsGroupStop =
+                -- As per `man 2 ptrace`, only these signals are stopping
+                -- signals and allow group stops.
+                sig `elem` [sigSTOP, sigTSTP, sigTTIN, sigTTOU]
+          isGroupStop <-
+            if not signalAllowsGroupStop
+              then pure False
+              else ptrace_GETSIGINFO_isGroupStop returnedPid
+
           if
             | sig == (sigTRAP .|. 0x80) -> case Map.lookup returnedPid currentSyscalls of
                 Just callAndArgs -> pure (state{ currentSyscalls = Map.delete returnedPid currentSyscalls }, SyscallStop (SyscallExit callAndArgs))
@@ -619,6 +666,9 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_VFORK)
                 | otherwise -> do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_OTHER)
+
+            | isGroupStop -> do
+                pure (state, GroupStop sig)
 
             | otherwise -> do
                 -- A signal was sent towards the tracee.
