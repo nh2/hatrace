@@ -588,43 +588,44 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
         -- Signals that come in without killing the process appear in
         -- the `Stopped` case.
         Signaled _sig -> pure (state, Death $ ExitFailure (fromIntegral fullStatus))
-        Stopped sig
-          | sig == (sigTRAP .|. 0x80) -> case Map.lookup returnedPid currentSyscalls of
-              Just callAndArgs -> pure (state{ currentSyscalls = Map.delete returnedPid currentSyscalls }, SyscallStop (SyscallExit callAndArgs))
-              Nothing -> do
-                callAndArgs <- getEnteredSyscall returnedPid
-                pure (state{ currentSyscalls = Map.insert returnedPid callAndArgs currentSyscalls }, SyscallStop (SyscallEnter callAndArgs))
-          | sig == sigTRAP -> if
-              -- For each special PTRACE_EVENT_* we want to catch here,
-              -- remember in needs to be enabled first via `ptrace_setoptions`.
+        Stopped sig -> do
+          if
+            | sig == (sigTRAP .|. 0x80) -> case Map.lookup returnedPid currentSyscalls of
+                Just callAndArgs -> pure (state{ currentSyscalls = Map.delete returnedPid currentSyscalls }, SyscallStop (SyscallExit callAndArgs))
+                Nothing -> do
+                  callAndArgs <- getEnteredSyscall returnedPid
+                  pure (state{ currentSyscalls = Map.insert returnedPid callAndArgs currentSyscalls }, SyscallStop (SyscallEnter callAndArgs))
+            | sig == sigTRAP -> if
+                -- For each special PTRACE_EVENT_* we want to catch here,
+                -- remember in needs to be enabled first via `ptrace_setoptions`.
 
-              -- Note: One way of many:
-              -- Technically we already know that it's `sigTRAP`,
-              -- from just above (`waitpidFullStatus` does the the same masking
-              -- we do here). `strace` just does an equivalent `switch` on
-              -- `status >> 16` to check the `PTRACE_EVENT_*` values).
-              -- We express it as `(status>>8) == (SIGTRAP | PTRACE_EVENT_foo << 8)`
-              -- because that's how the `ptrace` man page expresses this check.
-              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_EXIT `shiftL` 8)) -> do
-                  -- As discussed above, the child is still alive when
-                  -- this happens, and termination will only occur after
-                  -- the child is restarted with ptrace().
-                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_EXIT)
-              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_CLONE `shiftL` 8)) -> do
-                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_CLONE)
-              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_FORK `shiftL` 8)) -> do
-                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_FORK)
-              | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_VFORK `shiftL` 8)) -> do
-                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_VFORK)
-              | otherwise -> do
-                  pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_OTHER)
+                -- Note: One way of many:
+                -- Technically we already know that it's `sigTRAP`,
+                -- from just above (`waitpidFullStatus` does the the same masking
+                -- we do here). `strace` just does an equivalent `switch` on
+                -- `status >> 16` to check the `PTRACE_EVENT_*` values).
+                -- We express it as `(status>>8) == (SIGTRAP | PTRACE_EVENT_foo << 8)`
+                -- because that's how the `ptrace` man page expresses this check.
+                | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_EXIT `shiftL` 8)) -> do
+                    -- As discussed above, the child is still alive when
+                    -- this happens, and termination will only occur after
+                    -- the child is restarted with ptrace().
+                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_EXIT)
+                | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_CLONE `shiftL` 8)) -> do
+                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_CLONE)
+                | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_FORK `shiftL` 8)) -> do
+                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_FORK)
+                | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_VFORK `shiftL` 8)) -> do
+                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_VFORK)
+                | otherwise -> do
+                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_OTHER)
 
-          | otherwise -> do
-              -- A signal was sent towards the tracee.
-              -- We tell the caller about it, so they can deliver it or
-              -- filter it away (chosen by whether they pass it to their
-              -- next `ptrace_*` (e.g. `ptrace_syscall`) invocation.
-              return (state, SignalDeliveryStop sig) -- continue waiting for syscall
+            | otherwise -> do
+                -- A signal was sent towards the tracee.
+                -- We tell the caller about it, so they can deliver it or
+                -- filter it away (chosen by whether they pass it to their
+                -- next `ptrace_*` (e.g. `ptrace_syscall`) invocation.
+                return (state, SignalDeliveryStop sig) -- continue waiting for syscall
 
       return (newState, (returnedPid, event))
 
