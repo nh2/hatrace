@@ -4,6 +4,13 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Note about __safety of ptrace() in multi-threaded tracers__:
+--
+-- You must not call @ptrace(pid, ...)@ from an OS thread that's not the
+-- tracer of @pid@. Otherwise you'll get an @ESRCH@ error (@No such process@).
+--
+-- So you must use `runInBoundThread` or @forkOS` around functions from this
+-- module, unless their docs indicate that they already do this for you.
 module System.Hatrace
   ( traceForkProcess
   , traceForkExecvFullPath
@@ -32,6 +39,7 @@ module System.Hatrace
   ) where
 
 import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
 import           Data.Conduit
@@ -61,6 +69,7 @@ import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTI
 import qualified System.Posix.Signals as Signals
 import           System.Posix.Types (CPid(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..))
+import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
@@ -146,8 +155,14 @@ forkExecvWithPtrace args = do
   return childPid
 
 
-sourceTraceForkExecvFullPathWithSink :: (MonadIO m) => [String] -> ConduitT (CPid, TraceEvent) Void m a -> m (ExitCode, a)
-sourceTraceForkExecvFullPathWithSink args sink = do
+-- | A conduit that starts a traced process from given @args@, and yields all
+-- trace events that occur to it.
+--
+-- Already uses `runInBoundThread` internally, so using this ensures that you
+-- don't accidentally run a @ptrace()@ call from an OS thread that's not the
+-- tracer of the started process.
+sourceTraceForkExecvFullPathWithSink :: (MonadUnliftIO m) => [String] -> ConduitT (CPid, TraceEvent) Void m a -> m (ExitCode, a)
+sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
   childPid <- liftIO $ forkExecvWithPtrace args
   -- Now the child is stopped. Set options, then start it.
   liftIO $ annotatePtrace "ptrace_setoptions" $ ptrace_setoptions childPid
