@@ -3,12 +3,12 @@ version:             0.1.0.0
 synopsis:            strace as a library; inspect and intercept system calls
 description:         Gives programmatic access to recording, analysing and intercepting
                      a given program's system calls, signals, and memory contents.
-homepage:            https://gitlab.com/Norfair/hatrace#readme
+homepage:            https://github.com/nh2/hatrace#readme
 license:             MIT
 license-file:        LICENSE
-author:              Tom Sydney Kerckhove, Niklas Hambüchen
-maintainer:          syd.kerckhove@gmail.com
-copyright:           Copyright: (c) 2016 Tom Sydney Kerckhove, Niklas Hambüchen
+author:              Niklas Hambüchen <mail@nh2.me>, Tom Sydney Kerckhove <syd.kerckhove@gmail.com>
+maintainer:          Niklas Hambüchen <mail@nh2.me>
+copyright:           Copyright: (c) 2016 Tom Sydney Kerckhove, 2019 Niklas Hambüchen
 category:            System
 build-type:          Simple
 cabal-version:       >=1.10
@@ -76,4 +76,4 @@ test-suite hatrace-test
 
 source-repository head
   type:     git
-  location: https://gitlab.com/Norfair/hatrace
+  location: https://github.com/nh2/hatrace
