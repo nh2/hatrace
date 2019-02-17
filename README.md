@@ -1,4 +1,4 @@
-# hatrace - scripted strace
+# hatrace - scripted `strace`
 
 Includes:
 
