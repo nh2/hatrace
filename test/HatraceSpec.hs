@@ -135,17 +135,6 @@ spec = before_ assertNoChildren $ do
 
     it "can show that SIGTERM at the right time results in cut-off files for non-atomically writing programs" $ do
 
-      -- TODO: There may be a race in this test.
-      --       I have observed one case where I got:
-      --           expected: "aaa"
-      --           but got: "aaaa"
-      --       This may be because we send the TERM at the onset of the 4th
-      --       write, at which point the TERM signal races with the write.
-      --       To solve this, we should probably send the TERM after the
-      --       end of the 3rd write, _before_ the onset of the 4th write,
-      --       and check whether indeed the TERM arrived before the onset
-      --       of the 4th write.
-
       let targetFile = "example-programs-build/testfile-for-sigterm"
 
       let killAfter3Writes :: String -> IO ()
@@ -178,7 +167,11 @@ spec = before_ assertNoChildren $ do
       -- There should be 3 'a's in the file, as we killed after 3 writes.
       killAfter3Writes "non-atomic"
       fileContents <- BS.readFile targetFile
-      fileContents `shouldBe` "aaa"
+      -- Because we send a TERM at the onset of the 4th write, we don't know
+      -- which will happen first, so the 4th write may succeed or not.
+      -- TODO: This *might* still be racy, because signal delivery can be
+      --       arbitrarily delayed.
+      fileContents `shouldSatisfy` (`elem` ["aaa", "aaaa"])
 
       removeFile targetFile
 
