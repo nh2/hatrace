@@ -135,6 +135,17 @@ spec = before_ assertNoChildren $ do
 
     it "can show that SIGTERM at the right time results in cut-off files for non-atomically writing programs" $ do
 
+      -- TODO: There may be a race in this test.
+      --       I have observed one case where I got:
+      --           expected: "aaa"
+      --           but got: "aaaa"
+      --       This may be because we send the TERM at the onset of the 4th
+      --       write, at which point the TERM signal races with the write.
+      --       To solve this, we should probably send the TERM after the
+      --       end of the 3rd write, _before_ the onset of the 4th write,
+      --       and check whether indeed the TERM arrived before the onset
+      --       of the 4th write.
+
       let targetFile = "example-programs-build/testfile-for-sigterm"
 
       let killAfter3Writes :: String -> IO ()
