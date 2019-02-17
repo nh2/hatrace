@@ -68,7 +68,7 @@ import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
 import qualified System.Posix.Signals as Signals
 import           System.Posix.Types (CPid(..))
-import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..))
+import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..), Flag(..))
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
@@ -634,7 +634,9 @@ ptrace_GETSIGINFO_isGroupStop pid = alloca $ \ptr -> do
 waitForTraceEvent :: (HasCallStack) => TraceState -> IO (TraceState, (CPid, TraceEvent))
 waitForTraceEvent state@TraceState{ currentSyscalls } = do
 
-  mr <- waitpidFullStatus (-1) []
+  -- Using `AllChildren` (`__WALL`), as `man 2 ptrace` recommends and
+  -- like `strace` does.
+  mr <- waitpidFullStatus (-1) [AllChildren]
   case mr of
     -- This can occur when the caller incorrectly runs this on a non-traced process
     -- that exited by itself.
@@ -901,6 +903,9 @@ _WUNTRACED = 2
 _WCONTINUED :: CInt
 _WCONTINUED = 8
 
+__WALL :: CInt
+__WALL = 0x40000000
+
 
 -- TODO: Don't rely on this symbol of the posix-waitpid package
 foreign import ccall safe "SystemPosixWaitpid_waitpid" c_waitpid :: CPid -> Ptr CInt -> Ptr CInt -> CInt -> IO CPid
@@ -909,7 +914,8 @@ foreign import ccall safe "SystemPosixWaitpid_waitpid" c_waitpid :: CPid -> Ptr 
 doesProcessHaveChildren :: IO Bool
 doesProcessHaveChildren = alloca $ \resultPtr -> alloca $ \fullStatusPtr -> do
   -- Non-blocking request, and we want to know of *any* child's existence.
-  let options = _WNOHANG .|. _WUNTRACED .|. _WCONTINUED
+  -- Using `__WALL`, as `man 2 ptrace` recommends and like `strace` does.
+  let options = _WNOHANG .|. _WUNTRACED .|. _WCONTINUED .|. __WALL
   res <- c_waitpid (-1) resultPtr fullStatusPtr options
   errno <- getErrno
   if res == -1 && errno == eCHILD
