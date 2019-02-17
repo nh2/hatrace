@@ -107,7 +107,7 @@ ptrace_syscall pid mbSignal = do
             concat
               [ prettySrcLoc srcLoc
               | (_, srcLoc):_ <- [getCallStack callStack]
-              ] ++ ": "
+              ] ++ " (pid " ++ show pid ++ "): "
         | otherwise -> ""
   annotatePtrace (debugCallLocation ++ "ptrace_syscall") $
     Ptrace.Syscall.ptrace_syscall pid mbSignal
