@@ -10,9 +10,11 @@ import qualified Data.ByteString as BS
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
+import           Data.Maybe (isJust)
 import           Data.Set (Set)
 import qualified Data.Set as Set
-import           System.FilePath (takeFileName)
+import qualified Data.Text as T
+import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
@@ -222,7 +224,10 @@ spec = before_ assertNoChildren $ do
                           { enterDetail = SyscallEnterDetails_write{ fd, count } } -> do
                         let procFdPath = "/proc/" ++ show pid ++ "/fd/" ++ show fd
                         fullPath <- liftIO $ readSymbolicLink procFdPath
-                        let isRelevantFile = takeFileName fullPath == "Main.o"
+                        let isRelevantFile =
+                              -- Any .o file in the output `-outputdir`
+                              takeFileName (takeDirectory fullPath) == "example-programs-build"
+                              && isJust (T.stripSuffix ".o" (T.pack fullPath))
                         when isRelevantFile $ do
                           liftIO $ putStrLn $ "Observing write to relevant file: " ++ fullPath ++ "; bytes: " ++ show count
                           yield (pid, fullPath, count)
