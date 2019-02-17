@@ -40,7 +40,9 @@ pid_t fork_exec_with_ptrace(int argc, char **argv)
       perror("ptrace(PTRACE_TRACEME)");
       exit(1);
     }
-    kill(getpid(), SIGSTOP);
+    // In contrast to `kill(getpid(), ...)`, this has logic to handle the case
+    // that we're multi-threaded.
+    raise(SIGSTOP);
 
     // We use execv() instead of execvp() because we don't
     // want the latter's /bin/sh fallback.
