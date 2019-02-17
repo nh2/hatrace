@@ -12,9 +12,10 @@ import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
 import           Data.Set (Set)
 import qualified Data.Set as Set
+import           System.FilePath (takeFileName)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
-import           System.Posix.Files (getFileStatus, fileSize)
+import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Signals (sigTERM)
 import           System.Process (callProcess)
 import           Test.Hspec
@@ -180,45 +181,63 @@ spec = before_ assertNoChildren $ do
       targetExists <- doesFileExist targetFile
       targetExists `shouldBe` False
 
-    it "can be used to check whether GHC writes truncated object files or executables" $ do
+    it "can be used to check whether GHC writes truncated object files or executables (will fail on GHCs that don't have this fixed)" $ do
 
       let targetFile = "example-programs-build/haskell-hello"
+      -- Note that which GHC is used depends on PATH.
+      -- When the test is executed via stack, cabal, nix etc, the GHC is fixed
+      -- though, so this note is only relevant if you run the test executable
+      -- directly from the terminal.
       let program = "ghc"
       let args =
             [ "--make"
-            -- TODO enable this once we kill when writing the desired files (see TODO below)
-            -- , "-fforce-recomp"
             , "-outputdir", "example-programs-build/"
             , "example-programs/Hello.hs"
             , "-o", targetFile
             ]
 
-      let runGhcMake :: IO ()
-          runGhcMake = do
-            argv <- procToArgv program args
+      let runGhcMakeFullBuildWithKill :: IO ()
+          runGhcMakeFullBuildWithKill = do
+            argv <- procToArgv program (args ++ ["-fforce-recomp"])
 
-            let isWrite (_pid, SyscallStop (SyscallEnter (KnownSyscall Syscall_write, _args))) = True
-                isWrite _ = False
+            -- Note: Newer GHCs link with GNU gold by default,
+            -- which does not issue write() syscalls to write the final
+            -- executable, but uses fallocate()+mmap() instead.
+            -- We may still be able to kill gold at the right time to end up
+            -- with a half-written executable, but we cannot time it via
+            -- observing syscalls.
+            -- So we focus on GHC's `.o` files here instead of the linker's
+            -- executable outputs.
 
             -- We have to use SIGTERM and cannot use SIGKILL as of writing,
             -- because Hatrace cannot yet handle the case where the tracee
             -- instantly goes away: we get in that case:
             --     ptrace: does not exist (No such process)
             -- For showing the below, SIGTERM is good enough for now.
-            let killConduit =
-                  -- TODO: Actually do the kill
-                  -- awaitForever $ \(pid, _) -> liftIO $ sendSignal pid sigTERM
-                  return ()
+            let objectFileWriteFilterConduit =
+                  awaitForever $ \(pid, event) -> do
+                    case event of
+                      DetailedSyscallExit_write
+                        SyscallExitDetails_write
+                          { enterDetail = SyscallEnterDetails_write{ fd, count } } -> do
+                        let procFdPath = "/proc/" ++ show pid ++ "/fd/" ++ show fd
+                        fullPath <- liftIO $ readSymbolicLink procFdPath
+                        let isRelevantFile = takeFileName fullPath == "Main.o"
+                        when isRelevantFile $ do
+                          liftIO $ putStrLn $ "Observing write to relevant file: " ++ fullPath ++ "; bytes: " ++ show count
+                          yield (pid, fullPath, count)
+                      _ -> return ()
 
-                -- Filters away everything that's not a write syscall,
-                -- and at the onset of the 4th write, SIGTERMs the process.
-                killAt4thWriteConduit =
-                  -- TODO: Do the kill after some writes on `.o` files, not just any FDs
-                  CC.filter isWrite .| (CC.drop 3 >> killConduit)
+            let killConduit =
+                  awaitForever $ \(pid, _path, _count) -> liftIO $ do
+                    sendSignal pid sigTERM
 
             (exitCode, ()) <-
-              sourceTraceForkExecvFullPathWithSink argv (printSyscallOrSignalNameConduit .| killAt4thWriteConduit)
-            exitCode `shouldBe` ExitSuccess
+              sourceTraceForkExecvFullPathWithSink argv $
+                   syscallExitDetailsOnlyConduit
+                .| objectFileWriteFilterConduit
+                .| (CL.take 3 >> killConduit)
+            exitCode `shouldNotBe` ExitSuccess
 
       -- Delete potentially leftover files from previous build
       callProcess "rm" ["-f", targetFile, "example-programs-build/Main.hi", "example-programs-build/Main.o"]
@@ -227,10 +246,12 @@ spec = before_ assertNoChildren $ do
       callProcess program args
       expectedSize <- fileSize <$> getFileStatus targetFile
 
-      -- Build with kill
-      runGhcMake
+      -- Build build from scratch, with kill
+      putStrLn "\nRunning and then killing GHC; expect error messages below.\n"
+      runGhcMakeFullBuildWithKill
+      putStrLn "\nEnd of where error messages are expected.\n"
 
-      -- Build normally, check if results are normal
+      -- Build normally (incrementally), check if results are normal
       callProcess program args
       rebuildSize <- fileSize <$> getFileStatus targetFile
       rebuildSize `shouldBe` expectedSize
