@@ -407,7 +407,7 @@ getFormattedSyscallExitDetails syscall syscallArgs pid =
 
 traceForkExecvFullPath :: [String] -> IO ExitCode
 traceForkExecvFullPath args = do
-  (exitCode, ()) <- runConduit $
+  (exitCode, ()) <-
     sourceTraceForkExecvFullPathWithSink args (printSyscallOrSignalNameConduit .| CL.sinkNull)
   return exitCode
 

@@ -66,13 +66,13 @@ spec = before_ assertNoChildren $ do
 
     it "lets the process finish if the sink exits early" $ do
       argv <- procToArgv "echo" ["hello"]
-      (exitCode, ()) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv (return ())
+      (exitCode, ()) <- sourceTraceForkExecvFullPathWithSink argv (return ())
       exitCode `shouldBe` ExitSuccess
 
     it "allows obtaining all syscalls as a list for hello.asm" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
       argv <- procToArgv "example-programs-build/hello-linux-x86_64" []
-      (exitCode, events) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+      (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
 
       let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
       exitCode `shouldBe` ExitSuccess
@@ -90,7 +90,7 @@ spec = before_ assertNoChildren $ do
         -- otherwise bash will just execve() and not fork() at all, in which case
         -- this test wouldn't actually test tracing into subprocesses.
         argv <- procToArgv "bash" ["-c", "true && example-programs-build/hello-linux-x86_64"]
-        (exitCode, events) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
         let cloneWriteSyscalls =
               [ syscall
               | (_pid, SyscallStop (SyscallEnter (KnownSyscall syscall, _args))) <- events
@@ -116,7 +116,7 @@ spec = before_ assertNoChildren $ do
       let getSyscallsSetFor :: [String] -> IO (Set Syscall)
           getSyscallsSetFor args = do
             argv <- procToArgv "example-programs-build/atomic-write" args
-            (exitCode, events) <- runConduit $ sourceTraceForkExecvFullPathWithSink argv CL.consume
+            (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
             let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
             exitCode `shouldBe` ExitSuccess
             return (Set.fromList syscalls)
@@ -159,8 +159,7 @@ spec = before_ assertNoChildren $ do
                 killAt4thWriteConduit =
                   CC.filter isWrite .| (CC.drop 3 >> killConduit)
 
-            _ <- runConduit $
-              sourceTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
+            _ <- sourceTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
 
             return ()
 
@@ -213,7 +212,7 @@ spec = before_ assertNoChildren $ do
                   -- TODO: Do the kill after some writes on `.o` files, not just any FDs
                   CC.filter isWrite .| (CC.drop 3 >> killConduit)
 
-            (exitCode, ()) <- runConduit $
+            (exitCode, ()) <-
               sourceTraceForkExecvFullPathWithSink argv (printSyscallOrSignalNameConduit .| killAt4thWriteConduit)
             exitCode `shouldBe` ExitSuccess
 
@@ -242,7 +241,7 @@ spec = before_ assertNoChildren $ do
       it "has the right output for 'echo hello | cat'" $ do
         argv <- procToArgv "bash" ["-c", "echo hello | cat > /dev/null"]
         (exitCode, events) <-
-          runConduit $ sourceTraceForkExecvFullPathWithSink argv $
+          sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         let stdinReads =
               [ bufContents
