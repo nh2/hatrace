@@ -240,6 +240,20 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
       case preDetachWaitpidResult of
         Nothing -> error "sourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
         Just{} -> do
+          -- TODO as the man page says:
+          --        PTRACE_DETACH  is a restarting operation; therefore it requires the tracee to be in ptrace-stop.
+          --      We need to ensure/check we're in a ptrace-stop here.
+          --      Further from the man page:
+          --        If the tracee is running when the tracer wants to detach it, the usual
+          --        solution is to send SIGSTOP (using tgkill(2), to make sure it goes to
+          --        the correct  thread),  wait  for the  tracee  to  stop  in
+          --        signal-delivery-stop for SIGSTOP and then detach it (suppressing
+          --        SIGSTOP injection).  A design bug is that this can race with concurrent
+          --        SIGSTOPs. Another complication is that the tracee may enter other
+          --        ptrace-stops and needs to be restarted and waited for again, until
+          --        SIGSTOP is seen.  Yet another complication  is  to be sure that the
+          --        tracee is not already ptrace-stopped, because no signal delivery
+          --        happens while it is—not even SIGSTOP.
           ptrace_detach childPid
           waitpidResult <- waitpidFullStatus childPid []
           case waitpidResult of
