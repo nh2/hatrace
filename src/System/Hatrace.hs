@@ -695,6 +695,8 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_FORK)
                 | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_VFORK `shiftL` 8)) -> do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_VFORK)
+                | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_EXEC `shiftL` 8)) -> do
+                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_EXEC)
                 | otherwise -> do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_OTHER)
 
