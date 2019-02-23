@@ -264,6 +264,11 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
   return (finalExitCode, a)
 
 
+word64ToPtr :: Word64 -> Ptr a
+word64ToPtr w = wordPtrToPtr (fromIntegral w)
+{-# INLINE word64ToPtr #-}
+
+
 -- * Syscall details
 --
 -- __Note:__ The data types below use @DuplicateRecordFields@.
@@ -317,11 +322,11 @@ data DetailedSyscallExit
 
 
 getSyscallEnterDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallEnter
-getSyscallEnterDetails syscall syscallArgs pid = case syscall of
+getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in case syscall of
   Syscall_write -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
-    let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
-    bufContents <- peekBytes (TracedProcess pid) bufPtr (fromIntegral count)
+    let bufPtr = word64ToPtr bufAddr
+    bufContents <- peekBytes proc bufPtr (fromIntegral count)
     pure $ DetailedSyscallEnter_write $ SyscallEnterDetails_write
       { fd = fromIntegral fd
       , buf = bufPtr
@@ -330,7 +335,7 @@ getSyscallEnterDetails syscall syscallArgs pid = case syscall of
       }
   Syscall_read -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
-    let bufPtr = wordPtrToPtr (fromIntegral bufAddr)
+    let bufPtr = word64ToPtr bufAddr
     pure $ DetailedSyscallEnter_read $ SyscallEnterDetails_read
       { fd = fromIntegral fd
       , buf = bufPtr
@@ -822,7 +827,7 @@ getEnteredSyscall cpid = do
       -- See
       --   https://www.felixcloutier.com/x86/syscall
       --   https://www.felixcloutier.com/x86/intn:into:int3:int1
-      let syscallLocation = wordPtrToPtr (fromIntegral (rip - 2)) -- Word is Word64 on this arch
+      let syscallLocation = word64ToPtr (rip - 2) -- Word is Word64 on this arch
       -- Note: `peekBytes` has a little-endian-assumption comment in it;
       -- this may not work on big-endian (I haven't checked it)
       opcode <- peekBytes (TracedProcess cpid) syscallLocation 2
