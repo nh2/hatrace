@@ -10,19 +10,16 @@ import           Language.Haskell.TH
 import           Data.Word (Word32, Word64)
 
 import           System.Hatrace.SyscallTables (readSyscallTable)
+import           System.Hatrace.SyscallTables.Util (mkSyscallName)
 
 
 $(do
-
-  let syscallName :: String -> String
-      syscallName name = "Syscall_" ++ name
-
   -- We use the x86_64 table to extract the names for the data type.
   table <- runIO $ readSyscallTable "syscalls-table/tables/syscalls-x86_64"
 
-  -- Generates `data KnownSyscall = Read | Write | ...`
+  -- Generates `data KnownSyscall = Syscall_Read | Syscall_Write | ...`
   let constructors =
-        [ NormalC (mkName (syscallName name)) [] | (name, _num) <- table ]
+        [ NormalC (mkSyscallName name) [] | (name, _num) <- table ]
   let data_Syscalls =
         DataD
           []
@@ -36,13 +33,21 @@ $(do
                                [ConT ''Eq, ConT ''Ord, ConT ''Show]
 #endif
 
-  -- Generates (syscall number -> Syscall_*) lookup function
-
   return
     [ data_Syscalls
     ]
 
  )
+
+
+syscallName :: KnownSyscall -> String
+syscallName =
+  $(do
+    -- We use the x86_64 table to extract the names for the rendering function.
+    table <- runIO $ readSyscallTable "syscalls-table/tables/syscalls-x86_64"
+
+    return $ LamCaseE [ Match (ConP (mkSyscallName name) []) (NormalB $ LitE $ StringL name) [] | (name, _) <- table ]
+  )
 
 
 syscallMap_x64_64 :: Map Word64 KnownSyscall
