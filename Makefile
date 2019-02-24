@@ -4,6 +4,7 @@ EXAMPLE_PROGRAMS += example-programs-build/hello-linux-i386-elf64
 EXAMPLE_PROGRAMS += example-programs-build/hello-linux-x86_64
 EXAMPLE_PROGRAMS += example-programs-build/segfault
 EXAMPLE_PROGRAMS += example-programs-build/atomic-write
+EXAMPLE_PROGRAMS += example-programs-build/write-EBADF
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
@@ -35,3 +36,7 @@ example-programs-build/segfault: example-programs/segfault.asm
 example-programs-build/atomic-write: example-programs/atomic-write.c
 	mkdir -p example-programs-build
 	gcc -std=c99 -Wall -Werror example-programs/atomic-write.c -o example-programs-build/atomic-write
+
+example-programs-build/write-EBADF: example-programs/write-EBADF.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/write-EBADF.c -o example-programs-build/write-EBADF

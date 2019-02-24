@@ -3,6 +3,7 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 
 -- | Note about __safety of ptrace() in multi-threaded tracers__:
 --
@@ -24,6 +25,8 @@ module System.Hatrace
   , SyscallExitDetails_read(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
+  , ERRNO(..)
+  , foreignErrnoToERRNO
   , getSyscallEnterDetails
   , syscallEnterDetailsOnlyConduit
   , syscallExitDetailsOnlyConduit
@@ -48,8 +51,9 @@ import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
-import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
-import           Foreign.C.Types (CInt(..), CLong(..), CChar(..), CSize(..))
+import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
+import           Foreign.C.String (peekCString)
+import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
@@ -72,7 +76,25 @@ import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), F
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
-import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
+
+
+mapLeft :: (a1 -> a2) -> Either a1 b -> Either a2 b
+mapLeft f = either (Left . f) Right
+
+
+-- | Not using "Foreign.C.Error"'s `Errno` because it doesn't have a `Show`
+-- instance, which would be a pain for consumers of our API.
+--
+-- Use `foreignErrnoToERRNO` to convert between them.
+newtype ERRNO = ERRNO CInt
+  deriving (Eq, Ord, Show)
+
+
+-- | Turn a "Foreign.C.Error" `Errno` into `ERRNO`.
+foreignErrnoToERRNO :: Errno -> ERRNO
+foreignErrnoToERRNO (Errno e) = ERRNO e
+
 
 -- | Adds some prefix (separated by @: @) to the error location of an `IOError`.
 addIOErrorPrefix :: String -> IO a -> IO a
@@ -345,26 +367,31 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
-getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallExit
+getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
 getSyscallExitDetails knownSyscall syscallArgs pid = do
-  detailedSyscallEnter <- getSyscallEnterDetails knownSyscall syscallArgs pid
-  result <- getExitedSyscallResult pid
 
-  case detailedSyscallEnter of
+  (result, mbErrno) <- getExitedSyscallResult pid
 
-    DetailedSyscallEnter_write
-      enterDetail@SyscallEnterDetails_write{} -> do
-        pure $ DetailedSyscallExit_write $
-          SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
+  case mbErrno of
+    Just errno -> return $ Left errno
+    Nothing -> Right <$> do
+      detailedSyscallEnter <- getSyscallEnterDetails knownSyscall syscallArgs pid
 
-    DetailedSyscallEnter_read
-      enterDetail@SyscallEnterDetails_read{ buf } -> do
-        bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
-        pure $ DetailedSyscallExit_read $
-          SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
+      case detailedSyscallEnter of
 
-    DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
-      pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+        DetailedSyscallEnter_write
+          enterDetail@SyscallEnterDetails_write{} -> do
+            pure $ DetailedSyscallExit_write $
+              SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
+
+        DetailedSyscallEnter_read
+          enterDetail@SyscallEnterDetails_read{ buf } -> do
+            bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+            pure $ DetailedSyscallExit_read $
+              SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
+
+        DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
+          pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
 
 syscallEnterDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallEnter) m ()
@@ -375,11 +402,11 @@ syscallEnterDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
   _ -> return () -- skip
 
 
-syscallExitDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallExit) m ()
+syscallExitDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, (Either (Syscall, ERRNO) DetailedSyscallExit)) m ()
 syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
-  SyscallStop (SyscallExit (KnownSyscall syscall, syscallArgs)) -> do
-    detailedSyscallEnter <- liftIO $ getSyscallExitDetails syscall syscallArgs pid
-    yield (pid, detailedSyscallEnter)
+  SyscallStop (SyscallExit (syscall@(KnownSyscall knownSyscall), syscallArgs)) -> do
+    eDetailed <- liftIO $ getSyscallExitDetails knownSyscall syscallArgs pid
+    yield (pid, mapLeft (syscall, ) eDetailed)
   _ -> return () -- skip
 
 
@@ -396,6 +423,13 @@ formatDetailedSyscallEnter = \case
 
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
+
+
+foreign import ccall unsafe "string.h strerror" c_strerror :: CInt -> IO (Ptr CChar)
+
+-- | Like "Foreign.C.Error"'s @errnoToIOError@, but getting only the string.
+strError :: ERRNO -> IO String
+strError (ERRNO errno) = c_strerror errno >>= peekCString
 
 
 formatDetailedSyscallExit :: DetailedSyscallExit -> String
@@ -429,8 +463,16 @@ getFormattedSyscallExitDetails syscall syscallArgs pid =
     UnknownSyscall number -> do
       pure $ "unknown_syscall_" ++ show number ++ "(" ++ show syscallArgs ++ ")"
     KnownSyscall knownSyscall -> do
-      detailed <- getSyscallExitDetails knownSyscall syscallArgs pid
-      pure $ formatDetailedSyscallExit detailed
+
+      eDetailed <- getSyscallExitDetails knownSyscall syscallArgs pid
+
+      case eDetailed of
+        Right detailedExit -> pure $ formatDetailedSyscallExit detailedExit
+        Left errno -> do
+          strErr <- strError errno
+          let formattedErrno = " (" ++ strErr ++ ")"
+          -- TODO implement remembering arguments
+          pure $ syscallName knownSyscall ++ "(TODO implement remembering arguments) = -1" ++ formattedErrno
 
 
 -- TODO Make a version of this that takes a CreateProcess.
@@ -876,18 +918,32 @@ getEnteredSyscall cpid = do
 
 
 -- | Returns the result of a syscall that we just exited after
--- `waitForTraceEvent`.
+-- `waitForTraceEvent`, and the `errno` value on failure.
+--
+-- Note that the kernel has no concept of `errno`, that is a libc concept.
+-- But `strace` and `man 2` syscall pages have the concept. Resources:
+--
+-- * https://nullprogram.com/blog/2016/09/23/
+-- * https://github.com/strace/strace/blob/6170252adc146638c283705c9f252cde66ac224e/linux/x86_64/get_error.c#L26-L28
+-- * https://github.com/strace/strace/blob/6170252adc146638c283705c9f252cde66ac224e/negated_errno.h#L13-L14
 --
 -- PRE:
 -- This must be called /only/ after `waitForTraceEvent` made us
 -- /exit/ a syscall;
 -- the returned values may be memory garbage.
-getExitedSyscallResult :: CPid -> IO Word64
+getExitedSyscallResult :: CPid -> IO (Word64, Maybe ERRNO)
 getExitedSyscallResult cpid = do
   regs <- annotatePtrace "getExitedSyscallResult: ptrace_getregs" $ ptrace_getregs cpid
-  pure $ case regs of
-    X86 X86Regs{ eax } -> fromIntegral eax
-    X86_64 X86_64Regs{ rax } -> rax
+  let retVal = case regs of
+        X86 X86Regs{ eax } -> fromIntegral eax
+        X86_64 X86_64Regs{ rax } -> rax
+  -- Using the same logic as musl libc here to translate Linux error return
+  -- values into `-1` an `errno`:
+  --     https://git.musl-libc.org/cgit/musl/tree/src/internal/syscall_ret.c?h=v1.1.15
+  pure $
+    if retVal > fromIntegral (-4096 :: CULong)
+      then (fromIntegral (-1 :: Int), Just $ ERRNO $ fromIntegral (-retVal))
+      else (retVal, Nothing)
 
 
 foreign import ccall safe "kill" c_kill :: CPid -> Signal -> IO CInt

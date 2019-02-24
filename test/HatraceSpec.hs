@@ -14,6 +14,7 @@ import qualified Data.Conduit.List as CL
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import           Foreign.C.Error (eBADF)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
@@ -84,6 +85,23 @@ spec = before_ assertNoChildren $ do
         [ KnownSyscall Syscall_execve
         , KnownSyscall Syscall_write
         , KnownSyscall Syscall_exit
+        ]
+
+    it "shows return code and errno of a failing write() syscall" $ do
+      callProcess "make" ["--quiet", "example-programs-build/write-EBADF"]
+      argv <- procToArgv "example-programs-build/write-EBADF" []
+      (exitCode, events) <-
+        sourceTraceForkExecvFullPathWithSink argv $
+          syscallExitDetailsOnlyConduit .| CL.consume
+      let writeErrnos =
+            -- We filter for writes, as the test program is written in C and
+            -- may make some syscalls that set errno, e.g.
+            --     access("/etc/ld.so.nohwcap", F_OK) = -1 ENOENT
+            -- on the Ubuntu 16.04 this was written on.
+            [ errno | (_pid, Left (KnownSyscall Syscall_write, errno)) <- events ]
+      exitCode `shouldBe` ExitFailure 1
+      writeErrnos `shouldBe`
+        [ foreignErrnoToERRNO eBADF
         ]
 
     describe "subprocess tracing" $ do
@@ -242,21 +260,23 @@ spec = before_ assertNoChildren $ do
             --     ptrace: does not exist (No such process)
             -- For showing the below, SIGTERM is good enough for now.
             let objectFileWriteFilterConduit =
-                  awaitForever $ \(pid, event) -> do
-                    case event of
-                      DetailedSyscallExit_write
-                        SyscallExitDetails_write
-                          { enterDetail = SyscallEnterDetails_write{ fd, count } } -> do
-                        let procFdPath = "/proc/" ++ show pid ++ "/fd/" ++ show fd
-                        fullPath <- liftIO $ readSymbolicLink procFdPath
-                        let isRelevantFile =
-                              -- Any file in the `-outputdir` that has `Main.o` in the path
-                              takeFileName (takeDirectory fullPath) == "example-programs-build"
-                              && T.isInfixOf "Main.o" (T.pack fullPath)
-                        when isRelevantFile $ do
-                          liftIO $ putStrLn $ "Observing write to relevant file: " ++ fullPath ++ "; bytes: " ++ show count
-                          yield (pid, fullPath, count)
-                      _ -> return ()
+                  awaitForever $ \(pid, exitOrErrno) -> do
+                    case exitOrErrno of
+                      Left{} -> return () -- ignore erroneous syscalls
+                      Right exit -> case exit of
+                        DetailedSyscallExit_write
+                          SyscallExitDetails_write
+                            { enterDetail = SyscallEnterDetails_write{ fd, count } } -> do
+                          let procFdPath = "/proc/" ++ show pid ++ "/fd/" ++ show fd
+                          fullPath <- liftIO $ readSymbolicLink procFdPath
+                          let isRelevantFile =
+                                -- Any file in the `-outputdir` that has `Main.o` in the path
+                                takeFileName (takeDirectory fullPath) == "example-programs-build"
+                                && T.isInfixOf "Main.o" (T.pack fullPath)
+                          when isRelevantFile $ do
+                            liftIO $ putStrLn $ "Observing write to relevant file: " ++ fullPath ++ "; bytes: " ++ show count
+                            yield (pid, fullPath, count)
+                        _ -> return ()
 
             let killConduit =
                   awaitForever $ \(pid, _path, _count) -> liftIO $ do
@@ -307,11 +327,13 @@ spec = before_ assertNoChildren $ do
         let stdinReads =
               [ bufContents
               | (_pid
-                , DetailedSyscallExit_read
-                    SyscallExitDetails_read
-                      { enterDetail = SyscallEnterDetails_read{ fd = 0 }
-                      , bufContents
-                      }
+                , Right (
+                    DetailedSyscallExit_read
+                      SyscallExitDetails_read
+                        { enterDetail = SyscallEnterDetails_read{ fd = 0 }
+                        , bufContents
+                        }
+                  )
                 ) <- events
               ]
         exitCode `shouldBe` ExitSuccess
