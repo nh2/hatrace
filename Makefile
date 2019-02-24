@@ -3,6 +3,8 @@ EXAMPLE_PROGRAMS += example-programs-build/hello-linux-i386
 EXAMPLE_PROGRAMS += example-programs-build/hello-linux-i386-elf64
 EXAMPLE_PROGRAMS += example-programs-build/hello-linux-x86_64
 EXAMPLE_PROGRAMS += example-programs-build/segfault
+EXAMPLE_PROGRAMS += example-programs-build/execve
+EXAMPLE_PROGRAMS += example-programs-build/execve-linux-null-envp
 EXAMPLE_PROGRAMS += example-programs-build/atomic-write
 EXAMPLE_PROGRAMS += example-programs-build/write-EBADF
 
@@ -36,6 +38,14 @@ example-programs-build/segfault: example-programs/segfault.asm
 	nasm -Wall -Werror -f elf64 example-programs/segfault.asm -o example-programs-build/segfault.o
 	ld -e _start example-programs-build/segfault.o -o example-programs-build/segfault
 	rm example-programs-build/segfault.o
+
+example-programs-build/execve: example-programs/execve.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/execve.c -o example-programs-build/execve
+
+example-programs-build/execve-linux-null-envp: example-programs/execve-linux-null-envp.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/execve-linux-null-envp.c -o example-programs-build/execve-linux-null-envp
 
 example-programs-build/atomic-write: example-programs/atomic-write.c
 	mkdir -p example-programs-build

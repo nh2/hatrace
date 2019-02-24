@@ -339,3 +339,48 @@ spec = before_ assertNoChildren $ do
         exitCode `shouldBe` ExitSuccess
         -- Concatenate because there may be short reads and retries.
         BS.concat stdinReads `shouldBe` "hello\n"
+
+    describe "execve" $ do
+
+      let runExecveProgram :: FilePath -> FilePath -> IO (ExitCode, [SyscallExitDetails_execve])
+          runExecveProgram execveProgram programToExecve = do
+            innerArgv <- procToArgv programToExecve []
+            argv <- procToArgv execveProgram innerArgv
+            (exitCode, events) <-
+              sourceTraceForkExecvFullPathWithSink argv $
+                syscallExitDetailsOnlyConduit .| CL.consume
+            let execveDetails =
+                  [ detail
+                  | (_pid, Right (DetailedSyscallExit_execve detail)) <- events
+                  ]
+            return (exitCode, execveDetails)
+
+      it "shows the right execve results for './execve hello-linux-x86_64'" $ do
+
+        callProcess "make" ["--quiet", "example-programs-build/execve", "example-programs-build/hello-linux-x86_64"]
+        (exitCode, execveDetails) <-
+          runExecveProgram
+            "example-programs-build/execve"
+            "example-programs-build/hello-linux-x86_64"
+        exitCode `shouldBe` ExitSuccess
+        -- There should be one execve() for our C program being started by the
+        -- test process, and one by the program that it execve()s.
+        execveDetails `shouldBe`
+          [ SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
+          , SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
+          ]
+
+      it "shows the right execve results for the special case './execve-linux-null-envp hello-linux-x86_64'" $ do
+
+        callProcess "make" ["--quiet", "example-programs-build/execve-linux-null-envp", "example-programs-build/hello-linux-x86_64"]
+        (exitCode, execveDetails) <-
+          runExecveProgram
+            "example-programs-build/execve-linux-null-envp"
+            "example-programs-build/hello-linux-x86_64"
+        exitCode `shouldBe` ExitSuccess
+        -- There should be one execve() for our C program being started by the
+        -- test process, and one by the program that it execve()s.
+        execveDetails `shouldBe`
+          [ SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
+          , SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
+          ]

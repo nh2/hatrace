@@ -23,6 +23,8 @@ module System.Hatrace
   , SyscallExitDetails_write(..)
   , SyscallEnterDetails_read(..)
   , SyscallExitDetails_read(..)
+  , SyscallEnterDetails_execve(..)
+  , SyscallExitDetails_execve(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -57,12 +59,12 @@ import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CS
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
-import           Foreign.Ptr (Ptr, wordPtrToPtr)
+import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
 import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
-import           System.Linux.Ptrace (TracedProcess(..), peekBytes, detach)
+import           System.Linux.Ptrace (TracedProcess(..), peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
 import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
 import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
 import           System.Linux.Ptrace.Types (Regs(..))
@@ -286,6 +288,11 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
   return (finalExitCode, a)
 
 
+wordToPtr :: Word -> Ptr a
+wordToPtr w = wordPtrToPtr (fromIntegral w)
+{-# INLINE wordToPtr #-}
+
+
 word64ToPtr :: Word64 -> Ptr a
 word64ToPtr w = wordPtrToPtr (fromIntegral w)
 {-# INLINE word64ToPtr #-}
@@ -329,9 +336,27 @@ data SyscallExitDetails_read = SyscallExitDetails_read
   } deriving (Eq, Ord, Show)
 
 
+data SyscallEnterDetails_execve = SyscallEnterDetails_execve
+  { filename :: Ptr CChar
+  , argv :: Ptr (Ptr CChar)
+  , envp :: Ptr (Ptr CChar)
+  -- Peeked details
+  , filenameBS :: ByteString
+  , argvList :: [ByteString]
+  , envpList :: [ByteString]
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_execve = SyscallExitDetails_execve
+  { optionalEnterDetail :: Maybe SyscallEnterDetails_execve
+  , execveResult :: CInt
+  } deriving (Eq, Ord, Show)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
+  | DetailedSyscallEnter_execve SyscallEnterDetails_execve
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -339,6 +364,7 @@ data DetailedSyscallEnter
 data DetailedSyscallExit
   = DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
+  | DetailedSyscallExit_execve SyscallExitDetails_execve
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -363,6 +389,43 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , buf = bufPtr
       , count = fromIntegral count
       }
+  Syscall_execve -> do
+    let SyscallArgs{ arg0 = filenameAddr, arg1 = argvPtrsAddr, arg2 = envpPtrsAddr } = syscallArgs
+    let filenamePtr = word64ToPtr filenameAddr
+    let argvPtrsPtr = word64ToPtr argvPtrsAddr
+    let envpPtrsPtr = word64ToPtr envpPtrsAddr
+    filenameBS <- peekNullTerminatedBytes proc filenamePtr
+
+    -- Per `man 2 execve`:
+    --     On Linux, argv and envp can be specified as NULL.
+    --     In both cases, this has the same effect as specifying the argument
+    --     as a pointer to a list containing a single null pointer.
+    --     Do not take advantage of this nonstandard and nonportable misfeature!
+    --     On many other UNIX systems, specifying argv as NULL will result in
+    --     an error (EFAULT).
+    --     Some other UNIX systems treat the envp==NULL case the same as Linux.
+    -- We handle the case that `argv` or `envp` are NULL below.
+
+    argvPtrs <-
+      if argvPtrsPtr == nullPtr
+        then pure []
+        else peekNullWordTerminatedWords proc argvPtrsPtr
+    envpPtrs <-
+      if envpPtrsPtr == nullPtr
+        then pure []
+        else peekNullWordTerminatedWords proc envpPtrsPtr
+
+    argvList <- mapM (peekNullTerminatedBytes proc . wordToPtr) argvPtrs
+    envpList <- mapM (peekNullTerminatedBytes proc . wordToPtr) envpPtrs
+
+    pure $ DetailedSyscallEnter_execve $ SyscallEnterDetails_execve
+      { filename = filenamePtr
+      , argv = argvPtrsPtr
+      , envp = envpPtrsPtr
+      , filenameBS
+      , argvList
+      , envpList
+      }
   _ -> pure $
     DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
@@ -375,23 +438,43 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
   case mbErrno of
     Just errno -> return $ Left errno
     Nothing -> Right <$> do
-      detailedSyscallEnter <- getSyscallEnterDetails knownSyscall syscallArgs pid
 
-      case detailedSyscallEnter of
+      -- For some syscalls we must not try to get the enter details at their exit,
+      -- because the registers involved are invalidated.
+      -- TODO: Address this by not re-fetching the enter details at all, but by
+      --       remembering them in a PID map.
+      case knownSyscall of
+        Syscall_execve | result == 0 -> do
+          -- The execve() worked, we cannot get its enter details, as the
+          -- registers involved are invalidated because the process image
+          -- has been replaced.
+          pure $ DetailedSyscallExit_execve
+            SyscallExitDetails_execve{ optionalEnterDetail = Nothing, execveResult = fromIntegral result }
+        _ -> do
+          -- For all other syscalls, we can get the enter details.
 
-        DetailedSyscallEnter_write
-          enterDetail@SyscallEnterDetails_write{} -> do
-            pure $ DetailedSyscallExit_write $
-              SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
+          detailedSyscallEnter <- getSyscallEnterDetails knownSyscall syscallArgs pid
 
-        DetailedSyscallEnter_read
-          enterDetail@SyscallEnterDetails_read{ buf } -> do
-            bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
-            pure $ DetailedSyscallExit_read $
-              SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
+          case detailedSyscallEnter of
 
-        DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
-          pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+            DetailedSyscallEnter_write
+              enterDetail@SyscallEnterDetails_write{} -> do
+                pure $ DetailedSyscallExit_write $
+                  SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
+
+            DetailedSyscallEnter_read
+              enterDetail@SyscallEnterDetails_read{ buf } -> do
+                bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+                pure $ DetailedSyscallExit_read $
+                  SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
+
+            DetailedSyscallEnter_execve
+              enterDetail@SyscallEnterDetails_execve{} -> do
+                pure $ DetailedSyscallExit_execve $
+                  SyscallExitDetails_execve{ optionalEnterDetail = Just enterDetail, execveResult = fromIntegral result }
+
+            DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
+              pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
 
 syscallEnterDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallEnter) m ()
@@ -421,6 +504,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_read{ fd, count } ->
       "read(" ++ show fd ++ ", void *buf, " ++ show count ++ ")"
 
+  DetailedSyscallEnter_execve
+    SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
+      "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -442,6 +529,15 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_read
     SyscallExitDetails_read{ enterDetail = SyscallEnterDetails_read{ fd, count }, readCount, bufContents } ->
       "read(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ") = " ++ show readCount
+
+  DetailedSyscallExit_execve
+    SyscallExitDetails_execve{ optionalEnterDetail, execveResult } ->
+      -- TODO implement remembering arguments
+      let arguments = case optionalEnterDetail of
+            Just SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
+              show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList
+            Nothing -> "TODO implement remembering arguments"
+      in "execve(" ++ arguments ++ ") = " ++ show execveResult
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
