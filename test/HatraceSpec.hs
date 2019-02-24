@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module HatraceSpec where
 
@@ -18,8 +19,9 @@ import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Signals (sigTERM)
-import           System.Process (callProcess)
+import           System.Process (callProcess, readProcess)
 import           Test.Hspec
+import           Text.Read (readMaybe)
 
 import System.Hatrace
 
@@ -182,20 +184,44 @@ spec = before_ assertNoChildren $ do
       targetExists <- doesFileExist targetFile
       targetExists `shouldBe` False
 
-    it "can be used to check whether GHC writes truncated object files or executables (will fail on GHCs that don't have this fixed)" $ do
+    it "can be used to check whether GHC writes truncated object files or executables" $ do
 
       let targetFile = "example-programs-build/haskell-hello"
       -- Note that which GHC is used depends on PATH.
       -- When the test is executed via stack, cabal, nix etc, the GHC is fixed
       -- though, so this note is only relevant if you run the test executable
-      -- directly from the terminal.
-      let program = "ghc"
+      -- directly from the terminal, or want to give your own GHC (see below).
+      let program = "env"
+      let ghc = "ghc"
+      -- let ghc = "/raid/src/ghc/ghc-atomic-writes/_build/stage1/bin/ghc"
+      -- So that a custom path can be given conveniently when testing a patch.
+      -- You probably want to set GHC_PACKAGE_PATH below when doing that so that
+      -- your custom GHC works even under `stack test`.
+      let isPatchedGhc = ghc /= "ghc"
       let args =
-            [ "--make"
+            [ ghc
+            -- [ "GHC_PACKAGE_PATH=/raid/src/ghc/ghc-atomic-writes/_build/stage1/lib/package.conf.d", ghc
+            , "--make"
             , "-outputdir", "example-programs-build/"
             , "example-programs/Hello.hs"
             , "-o", targetFile
             ]
+
+      ghcVersionOuput <- readProcess ghc ["--numeric-version"] ""
+      -- The bug was fixed in GHC 8.8
+      -- TODO Link to commit that fixes it;
+      --      the GHC `master` commit is https://gitlab.haskell.org/ghc/ghc/merge_requests/391
+      --      but it isn't picked on top of the 8.8 release branch yet
+      let isBuggedGhc
+            | isPatchedGhc = False
+            | otherwise =
+                case T.splitOn "." $ T.strip $ T.pack ghcVersionOuput of
+                  majorText:minorText:_
+                    | Just (major :: Int) <- readMaybe (T.unpack majorText)
+                    , Just (minor :: Int) <- readMaybe (T.unpack minorText)
+                      -> (major, minor) <= (8,6)
+                  _ -> error $ "Could not parse ghc version: " ++ ghcVersionOuput
+
 
       let runGhcMakeFullBuildWithKill :: IO ()
           runGhcMakeFullBuildWithKill = do
@@ -255,10 +281,16 @@ spec = before_ assertNoChildren $ do
       runGhcMakeFullBuildWithKill
       putStrLn "\nEnd of where error messages are expected.\n"
 
-      -- Build normally (incrementally), check if results are normal
-      callProcess program args
-      rebuildSize <- fileSize <$> getFileStatus targetFile
-      rebuildSize `shouldBe` expectedSize
+      -- Build normally (incrementally), check if results are normal.
+      -- A bugged GHC will typically have a linker error due to truncated .o files,
+      -- a fixed GHC will run to completion.
+      if isBuggedGhc
+        then do
+          callProcess program args `shouldThrow` anyIOException
+        else do
+          callProcess program args
+          rebuildSize <- fileSize <$> getFileStatus targetFile
+          rebuildSize `shouldBe` expectedSize
 
     it "can be used to check whether programs handle EINTR correctly" $ do
       pendingWith "implement test that uses PTRACE_INTERRUPT in every syscall"
