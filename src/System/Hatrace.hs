@@ -200,6 +200,7 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
     , TraceClone
     , TraceFork
     , TraceVFork
+    , TraceVForkDone
     -- Sign up for the various PTRACE_EVENT_* events we want to handle below.
     , TraceExec
     , TraceExit
@@ -642,10 +643,10 @@ data SyscallStopType
 
 
 data PTRACE_EVENT
-  = PTRACE_EVENT_VFORK
-  | PTRACE_EVENT_FORK
-  | PTRACE_EVENT_CLONE
-  | PTRACE_EVENT_VFORK_DONE
+  = PTRACE_EVENT_VFORK CPid -- ^ PID of the new child
+  | PTRACE_EVENT_FORK CPid -- ^ PID of the new child
+  | PTRACE_EVENT_CLONE CPid -- ^ PID of the new child
+  | PTRACE_EVENT_VFORK_DONE CPid -- ^ PID of the new child
   | PTRACE_EVENT_EXEC
   | PTRACE_EVENT_EXIT
   | PTRACE_EVENT_STOP
@@ -832,14 +833,26 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
                     -- this happens, and termination will only occur after
                     -- the child is restarted with ptrace().
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_EXIT)
+
                 | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_CLONE `shiftL` 8)) -> do
-                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_CLONE)
+                    newPid <- ptrace_geteventmsg returnedPid
+                    pure (state, PTRACE_EVENT_Stop (PTRACE_EVENT_CLONE (fromIntegral newPid)))
+
                 | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_FORK `shiftL` 8)) -> do
-                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_FORK)
+                    newPid <- ptrace_geteventmsg returnedPid
+                    pure (state, PTRACE_EVENT_Stop (PTRACE_EVENT_FORK (fromIntegral newPid)))
+
                 | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_VFORK `shiftL` 8)) -> do
-                    pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_VFORK)
+                    newPid <- ptrace_geteventmsg returnedPid
+                    pure (state, PTRACE_EVENT_Stop (PTRACE_EVENT_VFORK (fromIntegral newPid)))
+
+                | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_VFORKDONE `shiftL` 8)) -> do
+                    newPid <- ptrace_geteventmsg returnedPid
+                    pure (state, PTRACE_EVENT_Stop (PTRACE_EVENT_VFORK_DONE (fromIntegral newPid)))
+
                 | (fullStatus `shiftR` 8) == (sigTRAP .|. (_PTRACE_EVENT_EXEC `shiftL` 8)) -> do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_EXEC)
+
                 | otherwise -> do
                     pure (state, PTRACE_EVENT_Stop PTRACE_EVENT_OTHER)
 
