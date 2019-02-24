@@ -6,7 +6,8 @@
 module HatraceSpec where
 
 import           Control.Monad (when)
-import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import qualified Data.ByteString as BS
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
@@ -19,10 +20,12 @@ import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
+import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
 import           System.Posix.Signals (sigTERM)
 import           System.Process (callProcess, readProcess)
 import           Test.Hspec
 import           Text.Read (readMaybe)
+import           UnliftIO.Exception (bracket)
 
 import System.Hatrace
 
@@ -36,6 +39,16 @@ assertNoChildren = do
   hasChildren <- doesProcessHaveChildren
   when hasChildren $ do
     error "You have children you don't know of, probably from a previous test"
+
+
+withCoredumpsDisabled :: (MonadUnliftIO m) => m a -> m a
+withCoredumpsDisabled f = do
+  bracket
+    (liftIO $ getResourceLimit ResourceCoreFileSize)
+    (\coreLimit -> liftIO $ setResourceLimit ResourceCoreFileSize coreLimit)
+    $ \coreLimit -> do
+      liftIO $ setResourceLimit ResourceCoreFileSize coreLimit{ softLimit = ResourceLimit 0 }
+      f
 
 
 spec :: Spec
@@ -65,7 +78,13 @@ spec = before_ assertNoChildren $ do
 
     it "does not hang when the traced program segfaults" $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
-      traceForkProcess "example-programs-build/segfault" [] `shouldReturn` ExitFailure 139
+      -- Disable core dumps for the test to not litter in the working tree.
+      withCoredumpsDisabled $ do
+        -- Note: When we don't disable coredumps, teh exit code is 139 instead.
+        -- 11 is certainly signal SIGSEGV, but I'm not sure what exactly the
+        -- added 128 indicate (is that how the kernel tells us whether or not
+        -- "core dumped" happened?).
+        traceForkProcess "example-programs-build/segfault" [] `shouldReturn` ExitFailure 11
 
   describe "sourceTraceForkExecvFullPathWithSink" $ do
 
