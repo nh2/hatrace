@@ -588,7 +588,7 @@ traceForkExecvFullPath args = do
 -- | Passes through all syscalls and signals that come by,
 -- printing them, including details where available.
 printSyscallOrSignalNameConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, TraceEvent) m ()
-printSyscallOrSignalNameConduit = CL.mapM_ $ \(pid, event) -> do
+printSyscallOrSignalNameConduit = CL.iterM $ \(pid, event) -> do
   liftIO $ case event of
 
     SyscallStop enterOrExit -> case enterOrExit of
