@@ -9,6 +9,10 @@ EXAMPLE_PROGRAMS += example-programs-build/write-EBADF
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
 
+# Most examxple C programs are linked statically here so that they do no
+# syscalls related to dynamic loading, thus avoiding a syscall flood
+# unrelated to the key thing each program does.
+
 example-programs-build/hello-linux-i386: example-programs/hello-linux-i386.asm
 	mkdir -p example-programs-build
 	nasm -Wall -Werror -f elf example-programs/hello-linux-i386.asm -o example-programs-build/hello-linux-i386.o
@@ -35,7 +39,7 @@ example-programs-build/segfault: example-programs/segfault.asm
 
 example-programs-build/atomic-write: example-programs/atomic-write.c
 	mkdir -p example-programs-build
-	gcc -std=c99 -Wall -Werror example-programs/atomic-write.c -o example-programs-build/atomic-write
+	gcc -static -std=c99 -Wall -Werror example-programs/atomic-write.c -o example-programs-build/atomic-write
 
 example-programs-build/write-EBADF: example-programs/write-EBADF.c
 	mkdir -p example-programs-build
