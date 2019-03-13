@@ -24,7 +24,7 @@ Includes:
   * Speed up your fuzzing by having full insight into the fuzzed program's behaviour.
 * **Adding features to existing programs**
   * Add "magic" support for new file systems without modifying existing programs (like [this paper](https://www.usenix.org/legacy/events/expcs07/papers/22-spillane.pdf) shows).
-  * Add logging capabilities to prgrams that were designed without.
+  * Add logging capabilities to programs that were designed without.
 
 ## Work in progress
 
