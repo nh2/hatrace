@@ -54,7 +54,3 @@ example-programs-build/atomic-write: example-programs/atomic-write.c
 example-programs-build/write-EBADF: example-programs/write-EBADF.c
 	mkdir -p example-programs-build
 	gcc -static -std=c99 -Wall -Werror example-programs/write-EBADF.c -o example-programs-build/write-EBADF
-
-example-programs-build/exit: example-programs/exit.c
-	mkdir -p example-programs-build
-	gcc -static -Wall -Werror example-programs/exit.c -o example-programs-build/exit
