@@ -25,6 +25,10 @@ module System.Hatrace
   , SyscallExitDetails_read(..)
   , SyscallEnterDetails_execve(..)
   , SyscallExitDetails_execve(..)
+  , SyscallEnterDetails_exit(..)
+  , SyscallExitDetails_exit(..)
+  , SyscallEnterDetails_exitGroup(..)
+  , SyscallExitDetails_exitGroup(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -305,6 +309,26 @@ word64ToPtr w = wordPtrToPtr (fromIntegral w)
 -- Users should also use @DuplicateRecordFields@ to avoid getting
 -- @Ambiguous occurrence@ errors.
 
+data SyscallEnterDetails_exit = SyscallEnterDetails_exit
+    {
+      exitStatus :: CInt
+    } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_exit = SyscallExitDetails_exit
+    {
+      enterDetail :: SyscallEnterDetails_exit
+    } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_exitGroup = SyscallEnterDetails_exitGroup
+    {
+      exitStatus :: CInt
+    } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_exitGroup = SyscallExitDetails_exitGroup
+    {
+      enterDetail :: SyscallEnterDetails_exitGroup
+    } deriving (Eq, Ord, Show)
+
 
 data SyscallEnterDetails_write = SyscallEnterDetails_write
   { fd :: CInt
@@ -357,6 +381,8 @@ data DetailedSyscallEnter
   = DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
+  | DetailedSyscallEnter_exit SyscallEnterDetails_exit
+  | DetailedSyscallEnter_exitGroup SyscallEnterDetails_exitGroup
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -365,6 +391,8 @@ data DetailedSyscallExit
   = DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
+  | DetailedSyscallExit_exit SyscallExitDetails_exit
+  | DetailedSyscallExit_exitGroup SyscallExitDetails_exitGroup
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -395,7 +423,6 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let argvPtrsPtr = word64ToPtr argvPtrsAddr
     let envpPtrsPtr = word64ToPtr envpPtrsAddr
     filenameBS <- peekNullTerminatedBytes proc filenamePtr
-
     -- Per `man 2 execve`:
     --     On Linux, argv and envp can be specified as NULL.
     --     In both cases, this has the same effect as specifying the argument
@@ -426,8 +453,14 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , argvList
       , envpList
       }
-  _ -> pure $
-    DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
+  Syscall_exit -> do
+    let SyscallArgs{ arg0 = exitStatus } = syscallArgs
+    pure $ DetailedSyscallEnter_exit $ SyscallEnterDetails_exit { exitStatus = fromIntegral exitStatus}
+  Syscall_exit_group -> do
+    let SyscallArgs{ arg0 = exitStatus } = syscallArgs
+    pure $ DetailedSyscallEnter_exitGroup $ SyscallEnterDetails_exitGroup { exitStatus = fromIntegral exitStatus}
+  _ -> do
+    pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
 getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -473,6 +506,14 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_execve $
                   SyscallExitDetails_execve{ optionalEnterDetail = Just enterDetail, execveResult = fromIntegral result }
 
+            DetailedSyscallEnter_exit
+              enterDetail@SyscallEnterDetails_exit{} -> do
+                pure $ DetailedSyscallExit_exit $ SyscallExitDetails_exit { enterDetail }
+
+            DetailedSyscallEnter_exitGroup
+              enterDetail@SyscallEnterDetails_exitGroup{} -> do
+                pure $ DetailedSyscallExit_exitGroup $ SyscallExitDetails_exitGroup { enterDetail }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -508,6 +549,14 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
       "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList ++ ")"
 
+  DetailedSyscallEnter_exit
+    SyscallEnterDetails_exit{ exitStatus } ->
+      "exit(" ++ show exitStatus ++ ")"
+
+  DetailedSyscallEnter_exitGroup
+    SyscallEnterDetails_exitGroup{ exitStatus } ->
+      "exit_group(" ++ show exitStatus ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -538,6 +587,14 @@ formatDetailedSyscallExit = \case
               show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList
             Nothing -> "TODO implement remembering arguments"
       in "execve(" ++ arguments ++ ") = " ++ show execveResult
+
+  DetailedSyscallExit_exit
+    SyscallExitDetails_exit{ enterDetail = SyscallEnterDetails_exit{ exitStatus }} ->
+      "exit(" ++ show exitStatus ++ ")"
+
+  DetailedSyscallExit_exitGroup
+    SyscallExitDetails_exitGroup{ enterDetail = SyscallEnterDetails_exitGroup{ exitStatus }} ->
+      "exit_group(" ++ show exitStatus ++ ")"
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
