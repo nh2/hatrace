@@ -958,6 +958,21 @@ getEnteredSyscall cpid = do
       -- Check whether it's an x86_64 or a legacy i386 syscall,
       -- and look up syscall number accordingly.
 
+      -- There are 4 ways in total you can make a syscall
+      -- (see https://reverseengineering.stackexchange.com/questions/2869/how-to-use-sysenter-under-linux/2894#2894):
+      --
+      -- * `int $0x80`
+      -- * `sysenter` (i586)
+      -- * `call *%gs:0x10` (vdso trampoline)
+      -- * `syscall` (amd64)
+      --
+      -- On 32-bit x86 Linux the vdso trampoline prefers `sysenter` over
+      -- `int 0x80` when possible.
+      -- See also: https://github.com/systemd/systemd/issues/11974
+
+      -- TODO: Implement we need to implement a check for `sysenter` below,
+      --       so that we cover all possible ways.
+
       -- Both the `syscall` instruction and the `int 0x80` instruction
       -- are 2 Bytes:
       --   syscall opcode: 0x0F 0x05
