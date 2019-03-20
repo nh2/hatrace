@@ -404,3 +404,19 @@ spec = before_ assertNoChildren $ do
           [ SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
           , SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
           ]
+
+
+    describe "close" $ do
+      it "seen at least for 1 file for 'cat /dev/null'" $ do
+        argv <- procToArgv "cat" ["/dev/null"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let closeEvents =
+              [ detail
+              | (_pid
+                , Right (DetailedSyscallExit_close detail)
+                ) <- events
+              ]
+        closeEvents `shouldSatisfy` (not . null)

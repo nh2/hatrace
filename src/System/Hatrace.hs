@@ -337,6 +337,16 @@ data SyscallExitDetails_read = SyscallExitDetails_read
   } deriving (Eq, Ord, Show)
 
 
+data SyscallEnterDetails_close = SyscallEnterDetails_close
+  { fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_close = SyscallExitDetails_close
+  { enterDetail :: SyscallEnterDetails_close
+  } deriving (Eq, Ord, Show)
+
+
 data SyscallEnterDetails_execve = SyscallEnterDetails_execve
   { filename :: Ptr CChar
   , argv :: Ptr (Ptr CChar)
@@ -358,6 +368,7 @@ data DetailedSyscallEnter
   = DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
+  | DetailedSyscallEnter_close SyscallEnterDetails_close
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -366,6 +377,7 @@ data DetailedSyscallExit
   = DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
+  | DetailedSyscallExit_close SyscallExitDetails_close
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -427,6 +439,11 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , argvList
       , envpList
       }
+  Syscall_close -> do
+    let SyscallArgs{ arg0 = fd } = syscallArgs
+    pure $ DetailedSyscallEnter_close $ SyscallEnterDetails_close
+      { fd = fromIntegral fd
+      }
   _ -> pure $
     DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
@@ -474,6 +491,11 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_execve $
                   SyscallExitDetails_execve{ optionalEnterDetail = Just enterDetail, execveResult = fromIntegral result }
 
+            DetailedSyscallEnter_close
+              enterDetail@SyscallEnterDetails_close{} -> do
+                pure $ DetailedSyscallExit_close $
+                  SyscallExitDetails_close{ enterDetail }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -505,6 +527,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_read{ fd, count } ->
       "read(" ++ show fd ++ ", void *buf, " ++ show count ++ ")"
 
+  DetailedSyscallEnter_close
+    SyscallEnterDetails_close{ fd } ->
+      "close(" ++ show fd ++ ")"
+
   DetailedSyscallEnter_execve
     SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
       "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList ++ ")"
@@ -530,6 +556,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_read
     SyscallExitDetails_read{ enterDetail = SyscallEnterDetails_read{ fd, count }, readCount, bufContents } ->
       "read(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ") = " ++ show readCount
+
+  DetailedSyscallExit_close
+    SyscallExitDetails_close{ enterDetail = SyscallEnterDetails_close{ fd } } ->
+      "close(" ++ show fd ++ ")"
 
   DetailedSyscallExit_execve
     SyscallExitDetails_execve{ optionalEnterDetail, execveResult } ->
