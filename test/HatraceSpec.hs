@@ -80,10 +80,11 @@ spec = before_ assertNoChildren $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
       -- Disable core dumps for the test to not litter in the working tree.
       withCoredumpsDisabled $ do
-        -- Note: When we don't disable coredumps, teh exit code is 139 instead.
+        -- Note: When we don't disable coredumps, the exit code is 139 instead.
         -- 11 is certainly signal SIGSEGV, but I'm not sure what exactly the
         -- added 128 indicate (is that how the kernel tells us whether or not
         -- "core dumped" happened?).
+        -- See also https://github.com/nh2/hatrace/issues/4#issuecomment-475196313
         traceForkProcess "example-programs-build/segfault" [] `shouldReturn` ExitFailure 11
 
   describe "sourceTraceForkExecvFullPathWithSink" $ do
