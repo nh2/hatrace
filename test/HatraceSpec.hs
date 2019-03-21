@@ -128,10 +128,10 @@ spec = before_ assertNoChildren $ do
 
       it "can trace 'bash -c ./hello'" $ do
         callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
-        -- We must run *something* (e.g. `true &&`) before the program,
+        -- We must run *something* (e.g. `&& true`) after the program,
         -- otherwise bash will just execve() and not fork() at all, in which case
         -- this test wouldn't actually test tracing into subprocesses.
-        argv <- procToArgv "bash" ["-c", "true && example-programs-build/hello-linux-x86_64"]
+        argv <- procToArgv "bash" ["-c", "example-programs-build/hello-linux-x86_64 && true"]
         (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
         let cloneWriteSyscalls =
               [ syscall
