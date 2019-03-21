@@ -40,9 +40,13 @@ pid_t fork_exec_with_ptrace(int argc, char **argv)
       perror("ptrace(PTRACE_TRACEME)");
       exit(1);
     }
-    // In contrast to `kill(getpid(), ...)`, this has logic to handle the case
-    // that we're multi-threaded.
-    raise(SIGSTOP);
+    // We use the syscall directly here, as opposed to e.g.
+    // libc's `raise()`, to guarantee consistent behaviour.
+    // The only thing that `raise()` would do for us is to
+    // handle the case where we are multi-threaded, using
+    // `pthread_kill()` in that case, but we are directly
+    // after `fork()` here so we know there's only 1 thread.
+    kill(getpid(), SIGSTOP);
 
     // We use execv() instead of execvp() because we don't
     // want the latter's /bin/sh fallback.
