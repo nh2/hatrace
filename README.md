@@ -36,3 +36,28 @@ While syscall names are automatically generated, detail data needs to be impleme
 Help to add more is appreciated.
 
 However, the Haskell API to write scripts can already do a log. Take a look at the test suite for examples.
+
+### TODO list for contributors
+
+If you find any of the below topics interesting give it a shot!
+It is recommended to file an issue when picking up one of the tasks to coordinate against doing duplicate work.
+
+* [ ] Implement all the syscalls
+* [ ] Remembering syscall arguments in a PID/TID map
+* [ ] Support for `sysenter`
+* [ ] reading tracee memory more efficiently (see [how strace does it](https://github.com/strace/strace/blob/d091f1a9e27756b3c399da1c500c915f473a56f3/ucopy.c#L45)
+* [ ] Helpers for modifying memory
+* [ ] One real-world example each for the use cases on `Use cases` above
+* [ ] `hatrace` executable features:
+  * [ ] JSON output
+  * [ ] Coloured output
+  * [ ] Timing `strace -ttt` and `-T`
+  * [ ] special run modes tailored to specific tasks (e.g. execve tree)
+* [ ] Support for setting options (for example enabling/disabling tracing into subprocesses, like `strace -f`)
+* [ ] Equivalent to `strace -y` (tracking origin of file descriptors, printing paths)
+* [ ] Equivalent to `strace -c` (keeping counts, summary statistics)
+* [ ] Extraction of `PTRACE_EVENT` detail information (see section `PTRACE_SETOPTIONS` in `man 2 ptrace`)
+* [ ] Filtering based on string buffer contents
+* [ ] Handling of `exit()` of the direct child (grand-child daemonisation)
+* [ ] Re-using strace's test suite for per-syscall tests
+* [ ] other TODOs in the code
