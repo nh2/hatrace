@@ -1,8 +1,10 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
 -- | Note about __safety of ptrace() in multi-threaded tracers__:
@@ -32,6 +34,9 @@ module System.Hatrace
   , getSyscallEnterDetails
   , syscallEnterDetailsOnlyConduit
   , syscallExitDetailsOnlyConduit
+  , ExecvStatus(..)
+  , PidMapEntry(..)
+  , execvTreeConduit
   , SyscallStopType(..)
   , TraceEvent(..)
   , TraceState(..)
@@ -55,7 +60,7 @@ import qualified Data.Map as Map
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
-import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
+import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..), CSSize(..))
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
@@ -318,14 +323,14 @@ data SyscallEnterDetails_write = SyscallEnterDetails_write
 
 data SyscallExitDetails_write = SyscallExitDetails_write
   { enterDetail :: SyscallEnterDetails_write
-  , writtenCount :: CSize
+  , writtenCount :: CSSize -- TODO CSize is wrong, should be signed!
   } deriving (Eq, Ord, Show)
 
 
 data SyscallEnterDetails_read = SyscallEnterDetails_read
   { fd :: CInt
   , buf :: Ptr Void
-  , count :: CSize
+  , count :: CSSize -- TODO CSize is wrong, should be signed!
   } deriving (Eq, Ord, Show)
 
 
@@ -388,6 +393,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
     let bufPtr = word64ToPtr bufAddr
     bufContents <- peekBytes proc bufPtr (fromIntegral count)
+    -- let bufContents = ""
     pure $ DetailedSyscallEnter_write $ SyscallEnterDetails_write
       { fd = fromIntegral fd
       , buf = bufPtr
@@ -483,6 +489,7 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
             DetailedSyscallEnter_read
               enterDetail@SyscallEnterDetails_read{ buf } -> do
                 bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+                -- let bufContents = ""
                 pure $ DetailedSyscallExit_read $
                   SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
 
@@ -533,7 +540,7 @@ formatDetailedSyscallEnter = \case
 
   DetailedSyscallEnter_execve
     SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
-      "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList ++ ")"
+      "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ")" -- ", " ++ show envpList ++ ")"
 
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
@@ -615,6 +622,119 @@ traceForkExecvFullPath args = do
   return exitCode
 
 
+modifyMap :: (Ord k) => Map k a -> k -> (Maybe a -> a) -> Map k a
+modifyMap m k f = Map.alter (Just . f) k m
+
+
+modifyMapWithRes :: (Ord k) => Map k a -> k -> (Maybe a -> (res, a)) -> (res, Map k a)
+modifyMapWithRes m k f = Map.alterF (\ma -> Just <$> f ma) k m
+
+
+data ExecvStatus
+  = DidNoExecv
+  | InitiatedExecv [ByteString]
+  | CompletedExecv [ByteString]
+  deriving (Eq, Ord, Show)
+
+
+data PidMapEntry = PidMapEntry
+  { parentPid :: Maybe CPid
+  , depth :: Int
+  , execvStatus :: ExecvStatus
+  } deriving (Eq, Ord, Show)
+
+
+execvTreeConduit :: forall m . (MonadIO m) => ConduitT (CPid, TraceEvent) (Int, [ByteString]) m (Map CPid PidMapEntry)
+execvTreeConduit = go Map.empty
+  where
+    printPidMap pm =
+      -- liftIO $ putStrLn $ "\n" ++ (concatMap (\x -> "  " ++ x ++ "\n") $ map show $ Map.toList pm)
+      return ()
+    go :: Map CPid PidMapEntry -> ConduitT (CPid, TraceEvent) (Int, [ByteString]) m (Map CPid PidMapEntry)
+    go pidMap = do
+      await >>= \case
+      -- await >>= \e -> liftIO (print e) >> case e of
+        Just (parentPid, PTRACE_EVENT_Stop event) -> do
+          let mbNewPid = case event of
+                PTRACE_EVENT_CLONE newPid -> Just newPid
+                PTRACE_EVENT_FORK newPid -> Just newPid
+                -- execve()s happen between vfork() being called and being
+                -- done (see `man 2 vfork`), so at the VFORK_DONE event
+                -- we must do nothing.
+                PTRACE_EVENT_VFORK newPid -> Just newPid
+                PTRACE_EVENT_VFORK_DONE newPid -> Nothing
+                _ -> Nothing
+          case mbNewPid of
+            Nothing -> go pidMap
+            Just newPid -> do
+              let !parentDepth = case Map.lookup parentPid pidMap of
+                    Nothing -> 0 -- this is the case for any top-level PIDs
+                    Just PidMapEntry{ depth } -> depth
+              let newPidMap = modifyMap pidMap newPid $ \case
+                    Nothing -> PidMapEntry{ parentPid = Just parentPid, depth = parentDepth + 1, execvStatus = DidNoExecv }
+                    -- There may already be a PID in the map, because a
+                    -- previously forked PID can be reused after death
+                    -- (and we don't track deaths currently to manage
+                    -- this info explicitly).
+                    Just{} -> PidMapEntry{ parentPid = Just parentPid, depth = parentDepth + 1, execvStatus = DidNoExecv }
+                      -- error $
+                      --   "execvTreeConduit: BUG: New process appearing"
+                      --   ++ " resulted in duplicate entry for new"
+                      --   ++ " PID "++ show newPid
+                      --   ++ "; existing entry: " ++ show entry
+              printPidMap newPidMap
+              go newPidMap
+
+        -- TODO we can get rid of this logic once we track enter syscall
+        --      entry details across into exits
+        Just (pid, SyscallStop (SyscallEnter (KnownSyscall knownSyscall@Syscall_execve, syscallArgs))) -> do
+          -- Above we match directly on `Syscall_execve`, so we save getting
+          -- details for other syscalls (which is expensive).
+          eDetailed <- liftIO $ getSyscallEnterDetails knownSyscall syscallArgs pid
+          case eDetailed of
+            DetailedSyscallEnter_execve SyscallEnterDetails_execve{ argvList } -> do
+              let newPidMap = modifyMap pidMap pid $ \case
+                    Nothing -> PidMapEntry{ parentPid = Nothing, depth = 0, execvStatus = InitiatedExecv argvList }
+                    Just entry -> entry{ execvStatus = InitiatedExecv argvList }
+              printPidMap newPidMap
+              go newPidMap
+            _ -> go pidMap -- ignore other syscalls
+
+        Just (pid, SyscallStop (SyscallExit (KnownSyscall knownSyscall@Syscall_execve, syscallArgs))) -> do
+          -- Above we match directly on `Syscall_execve`, so we save getting
+          -- details for other syscalls (which is expensive).
+          eDetailed <- liftIO $ getSyscallExitDetails knownSyscall syscallArgs pid
+          case eDetailed of
+            Left _errno -> do
+              -- If an execv errored, we need to set the status back from InitiatedExecv to DidNoExecv
+              let newPidMap = modifyMap pidMap pid $ \case
+                    Just entry -> entry{ execvStatus = DidNoExecv }
+                    Nothing -> error $ "execvTreeConduit: BUG: pidMap missing entry during execv error for PID " ++ show pid
+              printPidMap newPidMap
+              go newPidMap
+            Right (DetailedSyscallExit_execve SyscallExitDetails_execve{}) -> do
+              -- TODO This lookup of the depth and args can also go away once
+              --      we track enter syscall entry details across into exits;
+              --      then `modifyMapWithRes` can go away too.
+              let (depthAndArgs, newPidMap) = modifyMapWithRes pidMap pid $ \case
+                    Nothing -> error $ "execvTreeConduit: BUG: pidMap missing entry during execv exit for PID " ++ show pid
+                    Just entry@PidMapEntry{ depth } -> case execvStatus entry of
+                      InitiatedExecv args -> ((depth, args), entry{ execvStatus = CompletedExecv args })
+                      _ ->
+                        error $
+                          "execvTreeConduit: BUG: Unexpected"
+                          ++ " status /= InitiatedExecv during execv exit"
+                          ++ " for PID " ++ show pid ++ ";"
+                          ++ " entry is: " ++ show entry
+              yield depthAndArgs
+              printPidMap newPidMap
+              go newPidMap
+            _ -> go pidMap -- ignore other syscalls
+
+        Just _ -> go pidMap -- ignore other events
+        Nothing -> return pidMap -- done
+
+
 -- | Passes through all syscalls and signals that come by,
 -- printing them, including details where available.
 printSyscallOrSignalNameConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, TraceEvent) m ()
@@ -623,15 +743,17 @@ printSyscallOrSignalNameConduit = CL.iterM $ \(pid, event) -> do
 
     SyscallStop enterOrExit -> case enterOrExit of
 
-      SyscallEnter (syscall, syscallArgs) -> do
+      SyscallEnter (syscall@(KnownSyscall Syscall_execve), syscallArgs) -> do
         formatted <- getFormattedSyscallEnterDetails syscall syscallArgs pid
         putStrLn $ show [pid] ++ " Entering syscall: " ++ show syscall
           ++ (if formatted /= "" then ", details: " ++ formatted else "")
+      SyscallEnter _ -> return ()
 
-      SyscallExit (syscall, syscallArgs) -> do
+      SyscallExit (syscall@(KnownSyscall Syscall_execve), syscallArgs) -> do
         formatted <- getFormattedSyscallExitDetails syscall syscallArgs pid
         putStrLn $ show [pid] ++ " Exited syscall: " ++ show syscall
           ++ (if formatted /= "" then ", details: " ++ formatted else "")
+      SyscallExit _ -> return ()
 
     PTRACE_EVENT_Stop ptraceEvent -> do
       putStrLn $ show [pid] ++ " Got event: " ++ show ptraceEvent
