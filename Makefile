@@ -41,16 +41,16 @@ example-programs-build/segfault: example-programs/segfault.asm
 
 example-programs-build/execve: example-programs/execve.c
 	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/execve.c -o example-programs-build/execve
+	gcc -static -std=c99 -Wall -Werror -g example-programs/execve.c -o example-programs-build/execve
 
 example-programs-build/execve-linux-null-envp: example-programs/execve-linux-null-envp.c
 	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/execve-linux-null-envp.c -o example-programs-build/execve-linux-null-envp
+	gcc -static -std=c99 -Wall -Werror -g example-programs/execve-linux-null-envp.c -o example-programs-build/execve-linux-null-envp
 
 example-programs-build/atomic-write: example-programs/atomic-write.c
 	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/atomic-write.c -o example-programs-build/atomic-write
+	gcc -static -std=c99 -Wall -Werror -g example-programs/atomic-write.c -o example-programs-build/atomic-write
 
 example-programs-build/write-EBADF: example-programs/write-EBADF.c
 	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/write-EBADF.c -o example-programs-build/write-EBADF
+	gcc -static -std=c99 -Wall -Werror -g example-programs/write-EBADF.c -o example-programs-build/write-EBADF
