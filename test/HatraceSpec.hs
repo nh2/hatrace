@@ -445,3 +445,23 @@ spec = before_ assertNoChildren $ do
                 , pathnameBS == T.encodeUtf8 (T.pack tmpFile)
               ]
         tmpFileOpenatEvents `shouldSatisfy` (not . null)
+
+    describe "rename" $ do
+      it "seen for a file we do an atomic write to" $ do
+        makeAtomicWriteExample
+        tmpFile <- emptySystemTempFile "test-output"
+        argv <- procToArgv "example-programs-build/atomic-write" ["atomic", "10", tmpFile]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let renameToTmpFileEvents =
+              [ newpathBS
+              | (_pid
+                , Right (DetailedSyscallExit_rename
+                         SyscallExitDetails_rename
+                         { enterDetail = SyscallEnterDetails_rename{ newpathBS }})
+                ) <- events
+                , newpathBS == T.encodeUtf8 (T.pack tmpFile)
+              ]
+        renameToTmpFileEvents `shouldSatisfy` (not . null)
