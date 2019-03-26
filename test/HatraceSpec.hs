@@ -6,7 +6,7 @@
 module HatraceSpec where
 
 import           Control.Monad (when)
-import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import qualified Data.ByteString as BS
 import           Data.Conduit
