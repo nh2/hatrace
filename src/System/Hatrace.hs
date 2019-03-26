@@ -29,6 +29,12 @@ module System.Hatrace
   , SyscallExitDetails_write(..)
   , SyscallEnterDetails_read(..)
   , SyscallExitDetails_read(..)
+  , SyscallEnterDetails_rename(..)
+  , SyscallExitDetails_rename(..)
+  , SyscallEnterDetails_renameat(..)
+  , SyscallExitDetails_renameat(..)
+  , SyscallEnterDetails_renameat2(..)
+  , SyscallExitDetails_renameat2(..)
   , SyscallEnterDetails_execve(..)
   , SyscallExitDetails_execve(..)
   , DetailedSyscallEnter(..)
@@ -392,6 +398,53 @@ data SyscallExitDetails_close = SyscallExitDetails_close
   } deriving (Eq, Ord, Show)
 
 
+data SyscallEnterDetails_rename = SyscallEnterDetails_rename
+  { oldpath :: Ptr CChar
+  , newpath :: Ptr CChar
+  -- Peeked details
+  , oldpathBS :: ByteString
+  , newpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_rename = SyscallExitDetails_rename
+  { enterDetail :: SyscallEnterDetails_rename
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallEnterDetails_renameat = SyscallEnterDetails_renameat
+  { olddirfd :: CInt
+  , oldpath :: Ptr CChar
+  , newdirfd :: CInt
+  , newpath :: Ptr CChar
+  -- Peeked details
+  , oldpathBS :: ByteString
+  , newpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_renameat = SyscallExitDetails_renameat
+  { enterDetail :: SyscallEnterDetails_renameat
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallEnterDetails_renameat2 = SyscallEnterDetails_renameat2
+  { olddirfd :: CInt
+  , oldpath :: Ptr CChar
+  , newdirfd :: CInt
+  , newpath :: Ptr CChar
+  , flags :: CInt
+  -- Peeked details
+  , oldpathBS :: ByteString
+  , newpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_renameat2 = SyscallExitDetails_renameat2
+  { enterDetail :: SyscallEnterDetails_renameat2
+  } deriving (Eq, Ord, Show)
+
+
 data SyscallEnterDetails_execve = SyscallEnterDetails_execve
   { filename :: Ptr CChar
   , argv :: Ptr (Ptr CChar)
@@ -417,6 +470,9 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
   | DetailedSyscallEnter_close SyscallEnterDetails_close
+  | DetailedSyscallEnter_rename SyscallEnterDetails_rename
+  | DetailedSyscallEnter_renameat SyscallEnterDetails_renameat
+  | DetailedSyscallEnter_renameat2 SyscallEnterDetails_renameat2
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -429,6 +485,9 @@ data DetailedSyscallExit
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
   | DetailedSyscallExit_close SyscallExitDetails_close
+  | DetailedSyscallExit_rename SyscallExitDetails_rename
+  | DetailedSyscallExit_renameat SyscallExitDetails_renameat
+  | DetailedSyscallExit_renameat2 SyscallExitDetails_renameat2
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -525,6 +584,48 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_close $ SyscallEnterDetails_close
       { fd = fromIntegral fd
       }
+  Syscall_rename -> do
+    let SyscallArgs{ arg0 = oldpathAddr, arg1 = newpathAddr } = syscallArgs
+    let oldpathPtr = word64ToPtr oldpathAddr
+    let newpathPtr = word64ToPtr newpathAddr
+    oldpathBS <- peekNullTerminatedBytes proc oldpathPtr
+    newpathBS <- peekNullTerminatedBytes proc newpathPtr
+    pure $ DetailedSyscallEnter_rename $ SyscallEnterDetails_rename
+      { oldpath = oldpathPtr
+      , newpath = newpathPtr
+      , oldpathBS
+      , newpathBS
+      }
+  Syscall_renameat -> do
+    let SyscallArgs{ arg0 = olddirfd, arg1 = oldpathAddr, arg2 =newdirfd, arg3 = newpathAddr } = syscallArgs
+    let oldpathPtr = word64ToPtr oldpathAddr
+    let newpathPtr = word64ToPtr newpathAddr
+    oldpathBS <- peekNullTerminatedBytes proc oldpathPtr
+    newpathBS <- peekNullTerminatedBytes proc newpathPtr
+    pure $ DetailedSyscallEnter_renameat $ SyscallEnterDetails_renameat
+      { olddirfd = fromIntegral olddirfd
+      , oldpath = oldpathPtr
+      , newdirfd = fromIntegral newdirfd
+      , newpath = newpathPtr
+      , oldpathBS
+      , newpathBS
+      }
+  Syscall_renameat2 -> do
+    let SyscallArgs{ arg0 = olddirfd, arg1 = oldpathAddr
+                   , arg2 =newdirfd, arg3 = newpathAddr, arg4 = flags } = syscallArgs
+    let oldpathPtr = word64ToPtr oldpathAddr
+    let newpathPtr = word64ToPtr newpathAddr
+    oldpathBS <- peekNullTerminatedBytes proc oldpathPtr
+    newpathBS <- peekNullTerminatedBytes proc newpathPtr
+    pure $ DetailedSyscallEnter_renameat2 $ SyscallEnterDetails_renameat2
+      { olddirfd = fromIntegral olddirfd
+      , oldpath = oldpathPtr
+      , newdirfd = fromIntegral newdirfd
+      , newpath = newpathPtr
+      , oldpathBS
+      , newpathBS
+      , flags = fromIntegral flags
+      }
   _ -> pure $
     DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
@@ -592,6 +693,21 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_close $
                   SyscallExitDetails_close{ enterDetail }
 
+            DetailedSyscallEnter_rename
+              enterDetail@SyscallEnterDetails_rename{} -> do
+                pure $ DetailedSyscallExit_rename $
+                  SyscallExitDetails_rename{ enterDetail }
+
+            DetailedSyscallEnter_renameat
+              enterDetail@SyscallEnterDetails_renameat{} -> do
+                pure $ DetailedSyscallExit_renameat $
+                  SyscallExitDetails_renameat{ enterDetail }
+
+            DetailedSyscallEnter_renameat2
+              enterDetail@SyscallEnterDetails_renameat2{} -> do
+                pure $ DetailedSyscallExit_renameat2 $
+                  SyscallExitDetails_renameat2{ enterDetail }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -639,6 +755,20 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_close{ fd } ->
       "close(" ++ show fd ++ ")"
 
+  DetailedSyscallEnter_rename
+    SyscallEnterDetails_rename{ oldpathBS, newpathBS } ->
+      "rename(" ++ show oldpathBS ++ ", " ++ show newpathBS ++ ")"
+
+  DetailedSyscallEnter_renameat
+    SyscallEnterDetails_renameat{ olddirfd, oldpathBS, newdirfd, newpathBS } ->
+      "renameat(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
+                ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ")"
+
+  DetailedSyscallEnter_renameat2
+    SyscallEnterDetails_renameat2{ olddirfd, oldpathBS, newdirfd, newpathBS, flags } ->
+      "renameat2(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
+                 ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ", " ++ show flags ++ ")"
+
   DetailedSyscallEnter_execve
     SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
       "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList ++ ")"
@@ -680,6 +810,22 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_close
     SyscallExitDetails_close{ enterDetail = SyscallEnterDetails_close{ fd } } ->
       "close(" ++ show fd ++ ")"
+
+  DetailedSyscallExit_rename
+    SyscallExitDetails_rename{ enterDetail = SyscallEnterDetails_rename{ oldpathBS, newpathBS } } ->
+      "rename(" ++ show oldpathBS ++ ", " ++ show newpathBS ++ ")"
+
+  DetailedSyscallExit_renameat
+    SyscallExitDetails_renameat
+    { enterDetail = SyscallEnterDetails_renameat{ olddirfd, oldpathBS, newdirfd, newpathBS } } ->
+      "renameat(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
+                ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ")"
+
+  DetailedSyscallExit_renameat2
+    SyscallExitDetails_renameat2
+    { enterDetail = SyscallEnterDetails_renameat2{ olddirfd, oldpathBS, newdirfd, newpathBS, flags } } ->
+      "renameat2(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
+                 ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ", " ++ show flags ++ ")"
 
   DetailedSyscallExit_execve
     SyscallExitDetails_execve{ optionalEnterDetail, execveResult } ->
