@@ -19,6 +19,12 @@ module System.Hatrace
   , procToArgv
   , forkExecvWithPtrace
   , printSyscallOrSignalNameConduit
+  , SyscallEnterDetails_open(..)
+  , SyscallExitDetails_open(..)
+  , SyscallEnterDetails_openat(..)
+  , SyscallExitDetails_openat(..)
+  , SyscallEnterDetails_creat(..)
+  , SyscallExitDetails_creat(..)
   , SyscallEnterDetails_write(..)
   , SyscallExitDetails_write(..)
   , SyscallEnterDetails_read(..)
@@ -73,7 +79,7 @@ import           System.Linux.Ptrace.X86Regs (X86Regs(..))
 import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
 import qualified System.Posix.Signals as Signals
-import           System.Posix.Types (CPid(..))
+import           System.Posix.Types (CPid(..), CMode(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..), Flag(..))
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
@@ -306,6 +312,45 @@ word64ToPtr w = wordPtrToPtr (fromIntegral w)
 -- Users should also use @DuplicateRecordFields@ to avoid getting
 -- @Ambiguous occurrence@ errors.
 
+data SyscallEnterDetails_open = SyscallEnterDetails_open
+  { pathname :: Ptr CChar
+  , flags :: CInt
+  , mode :: CMode
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_open = SyscallExitDetails_open
+  { enterDetail :: SyscallEnterDetails_open
+  , fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_openat = SyscallEnterDetails_openat
+  { dirfd :: CInt
+  , pathname :: Ptr CChar
+  , flags :: CInt
+  , mode :: CMode
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_openat = SyscallExitDetails_openat
+  { enterDetail :: SyscallEnterDetails_openat
+  , fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_creat = SyscallEnterDetails_creat
+  { pathname :: Ptr CChar
+  , mode :: CMode
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_creat = SyscallExitDetails_creat
+  { enterDetail :: SyscallEnterDetails_creat
+  , fd :: CInt
+  } deriving (Eq, Ord, Show)
 
 data SyscallEnterDetails_write = SyscallEnterDetails_write
   { fd :: CInt
@@ -365,7 +410,10 @@ data SyscallExitDetails_execve = SyscallExitDetails_execve
 
 
 data DetailedSyscallEnter
-  = DetailedSyscallEnter_write SyscallEnterDetails_write
+  = DetailedSyscallEnter_open SyscallEnterDetails_open
+  | DetailedSyscallEnter_openat SyscallEnterDetails_openat
+  | DetailedSyscallEnter_creat SyscallEnterDetails_creat
+  | DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
   | DetailedSyscallEnter_close SyscallEnterDetails_close
@@ -374,7 +422,10 @@ data DetailedSyscallEnter
 
 
 data DetailedSyscallExit
-  = DetailedSyscallExit_write SyscallExitDetails_write
+  = DetailedSyscallExit_open SyscallExitDetails_open
+  | DetailedSyscallExit_openat SyscallExitDetails_openat
+  | DetailedSyscallExit_creat SyscallExitDetails_creat
+  | DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
   | DetailedSyscallExit_close SyscallExitDetails_close
@@ -384,6 +435,36 @@ data DetailedSyscallExit
 
 getSyscallEnterDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallEnter
 getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in case syscall of
+  Syscall_open -> do
+    let SyscallArgs{ arg0 = pathnameAddr, arg1 = flags, arg2 = mode } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_open $ SyscallEnterDetails_open
+      { pathname = pathnamePtr
+      , flags = fromIntegral flags
+      , mode = fromIntegral mode
+      , pathnameBS
+      }
+  Syscall_openat -> do
+    let SyscallArgs{ arg0 = dirfd, arg1 = pathnameAddr, arg2 = flags, arg3 = mode } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_openat $ SyscallEnterDetails_openat
+      { dirfd = fromIntegral dirfd
+      , pathname = pathnamePtr
+      , flags = fromIntegral flags
+      , mode = fromIntegral mode
+      , pathnameBS
+      }
+  Syscall_creat -> do
+    let SyscallArgs{ arg0 = pathnameAddr, arg1 = mode } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_creat $ SyscallEnterDetails_creat
+      { pathname = pathnamePtr
+      , mode = fromIntegral mode
+      , pathnameBS
+      }
   Syscall_write -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
     let bufPtr = word64ToPtr bufAddr
@@ -475,6 +556,21 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
 
           case detailedSyscallEnter of
 
+            DetailedSyscallEnter_open
+              enterDetail@SyscallEnterDetails_open{} -> do
+                pure $ DetailedSyscallExit_open $
+                  SyscallExitDetails_open{ enterDetail, fd = fromIntegral result }
+
+            DetailedSyscallEnter_openat
+              enterDetail@SyscallEnterDetails_openat{} -> do
+                pure $ DetailedSyscallExit_openat $
+                  SyscallExitDetails_openat{ enterDetail, fd = fromIntegral result }
+
+            DetailedSyscallEnter_creat
+              enterDetail@SyscallEnterDetails_creat{} -> do
+                pure $ DetailedSyscallExit_creat $
+                  SyscallExitDetails_creat{ enterDetail, fd = fromIntegral result }
+
             DetailedSyscallEnter_write
               enterDetail@SyscallEnterDetails_write{} -> do
                 pure $ DetailedSyscallExit_write $
@@ -519,6 +615,18 @@ syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
 formatDetailedSyscallEnter :: DetailedSyscallEnter -> String
 formatDetailedSyscallEnter = \case
 
+  DetailedSyscallEnter_open
+    SyscallEnterDetails_open{ pathnameBS, flags, mode } ->
+      "open(" ++ show pathnameBS ++ ", " ++ show flags ++ ", " ++ show mode ++ ")"
+
+  DetailedSyscallEnter_openat
+    SyscallEnterDetails_openat{ dirfd, pathnameBS, flags, mode } ->
+      "openat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ show flags ++ ", " ++ show mode ++ ")"
+
+  DetailedSyscallEnter_creat
+    SyscallEnterDetails_creat{ pathnameBS, mode } ->
+      "creat(" ++ show pathnameBS ++ ", " ++ show mode ++ ")"
+
   DetailedSyscallEnter_write
     SyscallEnterDetails_write{ fd, bufContents, count } ->
       "write(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ")"
@@ -548,6 +656,18 @@ strError (ERRNO errno) = c_strerror errno >>= peekCString
 
 formatDetailedSyscallExit :: DetailedSyscallExit -> String
 formatDetailedSyscallExit = \case
+
+  DetailedSyscallExit_open
+    SyscallExitDetails_open{ enterDetail = SyscallEnterDetails_open{ pathnameBS, flags, mode }, fd } ->
+      "open(" ++ show pathnameBS ++ ", " ++ show flags ++ ", " ++ show mode ++ ") = " ++ show fd
+
+  DetailedSyscallExit_openat
+    SyscallExitDetails_openat{ enterDetail = SyscallEnterDetails_openat{ dirfd, pathnameBS, flags, mode }, fd } ->
+      "openat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ show flags ++ ", " ++ show mode ++ ") = " ++ show fd
+
+  DetailedSyscallExit_creat
+    SyscallExitDetails_creat{ enterDetail = SyscallEnterDetails_creat{ pathnameBS, mode }, fd } ->
+      "creat(" ++ show pathnameBS ++ ", " ++ show mode ++ ") = " ++ show fd
 
   DetailedSyscallExit_write
     SyscallExitDetails_write{ enterDetail = SyscallEnterDetails_write{ fd, bufContents, count }, writtenCount } ->
