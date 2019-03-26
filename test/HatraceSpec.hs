@@ -15,10 +15,12 @@ import qualified Data.Conduit.List as CL
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (eBADF)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
+import           System.IO.Temp (emptySystemTempFile)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
 import           System.Posix.Signals (sigTERM)
@@ -50,6 +52,9 @@ withCoredumpsDisabled f = do
       liftIO $ setResourceLimit ResourceCoreFileSize coreLimit{ softLimit = ResourceLimit 0 }
       f
 
+makeAtomicWriteExample :: IO ()
+makeAtomicWriteExample =
+  callProcess "make" ["--quiet", "example-programs-build/atomic-write"]
 
 spec :: Spec
 spec = before_ assertNoChildren $ do
@@ -154,7 +159,7 @@ spec = before_ assertNoChildren $ do
 
     it "can point out that the difference in syscalls between atomic and non-atomic write is a rename" $ do
 
-      callProcess "make" ["--quiet", "example-programs-build/atomic-write"]
+      makeAtomicWriteExample
       let getSyscallsSetFor :: [String] -> IO (Set Syscall)
           getSyscallsSetFor args = do
             argv <- procToArgv "example-programs-build/atomic-write" args
@@ -420,3 +425,23 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         closeEvents `shouldSatisfy` (not . null)
+
+    describe "openat" $ do
+      it "seen for a file we open for writing" $ do
+        makeAtomicWriteExample
+        tmpFile <- emptySystemTempFile "test-output"
+        argv <- procToArgv "example-programs-build/atomic-write" ["non-atomic", "10", tmpFile]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let tmpFileOpenatEvents =
+              [ pathnameBS
+              | (_pid
+                , Right (DetailedSyscallExit_openat
+                         SyscallExitDetails_openat
+                         { enterDetail = SyscallEnterDetails_openat{ pathnameBS }})
+                ) <- events
+                , pathnameBS == T.encodeUtf8 (T.pack tmpFile)
+              ]
+        tmpFileOpenatEvents `shouldSatisfy` (not . null)
