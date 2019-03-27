@@ -25,6 +25,10 @@ module System.Hatrace
   , SyscallExitDetails_openat(..)
   , SyscallEnterDetails_creat(..)
   , SyscallExitDetails_creat(..)
+  , SyscallEnterDetails_pipe(..)
+  , SyscallExitDetails_pipe(..)
+  , SyscallEnterDetails_pipe2(..)
+  , SyscallExitDetails_pipe2(..)
   , SyscallEnterDetails_write(..)
   , SyscallExitDetails_write(..)
   , SyscallEnterDetails_read(..)
@@ -59,6 +63,7 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Internal as BS
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.List (genericLength)
@@ -68,10 +73,12 @@ import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
 import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
+import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr)
+import           Foreign.Storable (peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
@@ -358,6 +365,27 @@ data SyscallExitDetails_creat = SyscallExitDetails_creat
   , fd :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_pipe = SyscallEnterDetails_pipe
+  { pipefd :: Ptr CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_pipe = SyscallExitDetails_pipe
+  { enterDetail :: SyscallEnterDetails_pipe
+  , readfd :: CInt
+  , writefd :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_pipe2 = SyscallEnterDetails_pipe2
+  { pipefd :: Ptr CInt
+  , flags :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_pipe2 = SyscallExitDetails_pipe2
+  { enterDetail :: SyscallEnterDetails_pipe2
+  , readfd :: CInt
+  , writefd :: CInt
+  } deriving (Eq, Ord, Show)
+
 data SyscallEnterDetails_write = SyscallEnterDetails_write
   { fd :: CInt
   , buf :: Ptr Void
@@ -466,6 +494,8 @@ data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
   | DetailedSyscallEnter_creat SyscallEnterDetails_creat
+  | DetailedSyscallEnter_pipe SyscallEnterDetails_pipe
+  | DetailedSyscallEnter_pipe2 SyscallEnterDetails_pipe2
   | DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
@@ -481,6 +511,8 @@ data DetailedSyscallExit
   = DetailedSyscallExit_open SyscallExitDetails_open
   | DetailedSyscallExit_openat SyscallExitDetails_openat
   | DetailedSyscallExit_creat SyscallExitDetails_creat
+  | DetailedSyscallExit_pipe SyscallExitDetails_pipe
+  | DetailedSyscallExit_pipe2 SyscallExitDetails_pipe2
   | DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
@@ -523,6 +555,19 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { pathname = pathnamePtr
       , mode = fromIntegral mode
       , pathnameBS
+      }
+  Syscall_pipe -> do
+    let SyscallArgs{ arg0 = pipefdAddr } = syscallArgs
+    let pipefdPtr = word64ToPtr pipefdAddr
+    pure $ DetailedSyscallEnter_pipe $ SyscallEnterDetails_pipe
+      { pipefd = pipefdPtr
+      }
+  Syscall_pipe2 -> do
+    let SyscallArgs{ arg0 = pipefdAddr, arg1 = flags } = syscallArgs
+    let pipefdPtr = word64ToPtr pipefdAddr
+    pure $ DetailedSyscallEnter_pipe2 $ SyscallEnterDetails_pipe2
+      { pipefd = pipefdPtr
+      , flags = fromIntegral flags
       }
   Syscall_write -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
@@ -672,6 +717,18 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_creat $
                   SyscallExitDetails_creat{ enterDetail, fd = fromIntegral result }
 
+            DetailedSyscallEnter_pipe
+              enterDetail@SyscallEnterDetails_pipe{ pipefd } -> do
+                (readfd, writefd) <- readPipeFds pid pipefd
+                pure $ DetailedSyscallExit_pipe $
+                  SyscallExitDetails_pipe{ enterDetail, readfd, writefd }
+
+            DetailedSyscallEnter_pipe2
+              enterDetail@SyscallEnterDetails_pipe2{ pipefd } -> do
+                (readfd, writefd) <- readPipeFds pid pipefd
+                pure $ DetailedSyscallExit_pipe2 $
+                  SyscallExitDetails_pipe2{ enterDetail, readfd, writefd }
+
             DetailedSyscallEnter_write
               enterDetail@SyscallEnterDetails_write{} -> do
                 pure $ DetailedSyscallExit_write $
@@ -711,6 +768,14 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
+readPipeFds :: CPid -> Ptr CInt -> IO (CInt, CInt)
+readPipeFds pid pipefd = do
+  let fdSize = sizeOf (undefined :: CInt)
+      sz = 2 * fdSize
+  bytes <- peekBytes (TracedProcess pid) pipefd sz
+  let (ptr, off, _size) = BS.toForeignPtr bytes
+  withForeignPtr ptr $ \p -> do
+    (,) <$> peekByteOff p off <*> peekByteOff p (off + fdSize)
 
 syscallEnterDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallEnter) m ()
 syscallEnterDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
@@ -742,6 +807,14 @@ formatDetailedSyscallEnter = \case
   DetailedSyscallEnter_creat
     SyscallEnterDetails_creat{ pathnameBS, mode } ->
       "creat(" ++ show pathnameBS ++ ", " ++ show mode ++ ")"
+
+  DetailedSyscallEnter_pipe
+    SyscallEnterDetails_pipe{ } ->
+      "pipe([])"
+
+  DetailedSyscallEnter_pipe2
+    SyscallEnterDetails_pipe2{ flags } ->
+      "pipe([], " ++ show flags ++ ")"
 
   DetailedSyscallEnter_write
     SyscallEnterDetails_write{ fd, bufContents, count } ->
@@ -798,6 +871,14 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_creat
     SyscallExitDetails_creat{ enterDetail = SyscallEnterDetails_creat{ pathnameBS, mode }, fd } ->
       "creat(" ++ show pathnameBS ++ ", " ++ show mode ++ ") = " ++ show fd
+
+  DetailedSyscallExit_pipe
+    SyscallExitDetails_pipe{ enterDetail = SyscallEnterDetails_pipe{}, readfd, writefd } ->
+      "pipe([" ++ show readfd ++ ", " ++ show writefd ++ "])"
+
+  DetailedSyscallExit_pipe2
+    SyscallExitDetails_pipe2{ enterDetail = SyscallEnterDetails_pipe2{ flags }, readfd, writefd } ->
+      "pipe([" ++ show readfd ++ ", " ++ show writefd ++ "], " ++ show flags ++ ")"
 
   DetailedSyscallExit_write
     SyscallExitDetails_write{ enterDetail = SyscallEnterDetails_write{ fd, bufContents, count }, writtenCount } ->
