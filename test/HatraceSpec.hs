@@ -465,3 +465,20 @@ spec = before_ assertNoChildren $ do
                 , newpathBS == T.encodeUtf8 (T.pack tmpFile)
               ]
         renameToTmpFileEvents `shouldSatisfy` (not . null)
+
+    describe "pipe" $ do
+      it "seen when piping output in bash" $ do
+        argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let pipeEvents =
+              [ (readfd, writefd)
+              | (_pid
+                , Right (DetailedSyscallExit_pipe
+                         SyscallExitDetails_pipe
+                         { enterDetail = SyscallEnterDetails_pipe{}, readfd, writefd })
+                ) <- events
+              ]
+        pipeEvents `shouldSatisfy` (not . null)
