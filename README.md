@@ -56,8 +56,11 @@ It is recommended to file an issue when picking up one of the tasks to coordinat
 * [ ] Support for setting options (for example enabling/disabling tracing into subprocesses, like `strace -f`)
 * [ ] Equivalent to `strace -y` (tracking origin of file descriptors, printing paths)
 * [ ] Equivalent to `strace -c` (keeping counts, summary statistics)
+* [ ] Something similar to `strace -y` but telling which PID is which executable from `/proc/PID/exe`
 * [ ] Extraction of `PTRACE_EVENT` detail information (see section `PTRACE_SETOPTIONS` in `man 2 ptrace`)
 * [ ] Filtering based on string buffer contents
 * [ ] Handling of `exit()` of the direct child (grand-child daemonisation)
 * [ ] Re-using strace's test suite for per-syscall tests
 * [ ] other TODOs in the code
+* Use it to do specific investigations in other programs:
+  * [ ] investigate [big GHC linker speed differences](https://github.com/nh2/hatrace/pull/9#issuecomment-477573945)
