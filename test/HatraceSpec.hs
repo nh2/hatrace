@@ -435,6 +435,16 @@ spec = before_ assertNoChildren $ do
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
+        -- Some libcs use `open()`, some `openat()`.
+        let tmpFileOpenEvents =
+              [ pathnameBS
+              | (_pid
+                , Right (DetailedSyscallExit_open
+                         SyscallExitDetails_open
+                         { enterDetail = SyscallEnterDetails_open{ pathnameBS }})
+                ) <- events
+                , pathnameBS == T.encodeUtf8 (T.pack tmpFile)
+              ]
         let tmpFileOpenatEvents =
               [ pathnameBS
               | (_pid
@@ -444,7 +454,8 @@ spec = before_ assertNoChildren $ do
                 ) <- events
                 , pathnameBS == T.encodeUtf8 (T.pack tmpFile)
               ]
-        tmpFileOpenatEvents `shouldSatisfy` (not . null)
+        let allTmpFileOpenEvents = tmpFileOpenEvents ++ tmpFileOpenatEvents
+        allTmpFileOpenEvents `shouldSatisfy` (not . null)
 
     describe "rename" $ do
       it "seen for a file we do an atomic write to" $ do
