@@ -64,6 +64,7 @@ module System.Hatrace
   , sendSignal
   , doesProcessHaveChildren
   , getFdPath
+  , getExePath
   -- * Re-exports
   , KnownSyscall(..)
   ) where
@@ -1040,6 +1041,12 @@ getFdPath :: CPid -> CInt -> IO FilePath
 getFdPath pid fd = do
   let procFdPath = "/proc/" ++ show pid ++ "/fd/" ++ show fd
   readSymbolicLink procFdPath
+
+
+getExePath :: CPid -> IO FilePath
+getExePath pid = do
+  let procExePath = "/proc/" ++ show pid ++ "/exe"
+  readSymbolicLink procExePath
 
 
 data FileWriteEvent
