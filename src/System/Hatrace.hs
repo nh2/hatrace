@@ -63,7 +63,8 @@ import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
-import qualified Data.ByteString.Internal as BS
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BSI
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.List (genericLength)
@@ -773,7 +774,7 @@ readPipeFds pid pipefd = do
   let fdSize = sizeOf (undefined :: CInt)
       sz = 2 * fdSize
   bytes <- peekBytes (TracedProcess pid) pipefd sz
-  let (ptr, off, _size) = BS.toForeignPtr bytes
+  let (ptr, off, _size) = BSI.toForeignPtr bytes
   withForeignPtr ptr $ \p -> do
     (,) <$> peekByteOff p off <*> peekByteOff p (off + fdSize)
 
