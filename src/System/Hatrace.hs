@@ -1018,17 +1018,16 @@ fileWritesConduit = go
           detailedSyscallExit <- liftIO $ getSyscallExitDetails syscall syscallArgs pid
           case detailedSyscallExit of
             Right (DetailedSyscallExit_open SyscallExitDetails_open
-                   { enterDetail = SyscallEnterDetails_open { pathnameBS, flags }
+                   { enterDetail = SyscallEnterDetails_open { pathnameBS }
                    , fd }) ->
-              when (allowsWrites flags) $ yieldFdEvent pid fd (FileOpen pathnameBS)
+              yieldFdEvent pid fd (FileOpen pathnameBS)
             Right (DetailedSyscallExit_openat SyscallExitDetails_openat
-                   { enterDetail = SyscallEnterDetails_openat { pathnameBS, flags }
+                   { enterDetail = SyscallEnterDetails_openat { pathnameBS }
                    , fd }) ->
-              when (allowsWrites flags) $ yieldFdEvent pid fd (FileOpen pathnameBS)
+              yieldFdEvent pid fd (FileOpen pathnameBS)
             Right (DetailedSyscallExit_creat SyscallExitDetails_creat
                    { enterDetail = SyscallEnterDetails_creat { pathnameBS }
                    , fd }) ->
-              -- creat uses O_WRONLY
               yieldFdEvent pid fd (FileOpen pathnameBS)
             _ -> return ()
           go
@@ -1051,10 +1050,6 @@ fileWritesConduit = go
     yieldFdEvent pid fd event = do
       path <- liftIO $ getFdPath pid fd
       yield (path, event)
-    o_WRONLY = 0o00000001
-    o_RDWR   = 0o00000002
-    allowsWrites flags = flags .&. writeModes /= 0
-    writeModes = o_WRONLY .|. o_RDWR
 
 resolveToPidCwd :: Show a => a -> FilePath -> IO FilePath
 resolveToPidCwd pid path = do
