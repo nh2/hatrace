@@ -12,6 +12,7 @@ import qualified Data.ByteString as BS
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
+import qualified Data.Map as Map
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -339,6 +340,27 @@ spec = before_ assertNoChildren $ do
 
     it "can be used to check whether programs handle EINTR correctly" $ do
       pendingWith "implement test that uses PTRACE_INTERRUPT in every syscall"
+
+    it "observes atomic write in a program" $ do
+        makeAtomicWriteExample
+        tmpFile <- emptySystemTempFile "test-output"
+        argv <- procToArgv "example-programs-build/atomic-write" ["atomic", "10", tmpFile]
+        (exitCode, writes) <-
+          sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+        exitCode `shouldBe` ExitSuccess
+        case Map.lookup tmpFile writes of
+          Just (AtomicWrite _) -> return ()
+          other -> error $ "atomic write for " ++ show tmpFile ++
+                           " was expected but found " ++ show other
+
+    it "catches non-atomic write in a program" $ do
+        makeAtomicWriteExample
+        tmpFile <- emptySystemTempFile "test-output"
+        argv <- procToArgv "example-programs-build/atomic-write" ["non-atomic", "10", tmpFile]
+        (exitCode, writes) <-
+          sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+        exitCode `shouldBe` ExitSuccess
+        Map.lookup tmpFile writes `shouldBe` Just NonatomicWrite
 
   describe "per-syscall tests" $ do
 

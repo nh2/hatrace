@@ -37,6 +37,7 @@ library
                      , conduit
                      , containers
                      , directory
+                     , filepath
                      , linux-ptrace
                      , optparse-applicative
                      , posix-waitpid
