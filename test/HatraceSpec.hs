@@ -236,6 +236,7 @@ spec = before_ assertNoChildren $ do
       -- directly from the terminal, or want to give your own GHC (see below).
       let program = "env"
       let ghc = "ghc"
+      -- For my fixed GHC
       -- let ghc = "/raid/src/ghc/ghc-atomic-writes/_build/stage1/bin/ghc"
       -- So that a custom path can be given conveniently when testing a patch.
       -- You probably want to set GHC_PACKAGE_PATH below when doing that so that
@@ -243,6 +244,9 @@ spec = before_ assertNoChildren $ do
       let isPatchedGhc = ghc /= "ghc"
       let args =
             [ ghc
+            -- For my fixed GHC
+            -- Note it's very important that GHC_PACKAGE_PATH does not end with a '/',
+            -- see https://gitlab.haskell.org/ghc/ghc/issues/16360
             -- [ "GHC_PACKAGE_PATH=/raid/src/ghc/ghc-atomic-writes/_build/stage1/lib/package.conf.d", ghc
             , "--make"
             , "-outputdir", "example-programs-build/"
