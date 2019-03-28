@@ -52,6 +52,10 @@ module System.Hatrace
   , getSyscallEnterDetails
   , syscallEnterDetailsOnlyConduit
   , syscallExitDetailsOnlyConduit
+  , FileWriteEvent(..)
+  , fileWritesConduit
+  , FileWriteBehavior(..)
+  , atomicWritesSink
   , SyscallStopType(..)
   , TraceEvent(..)
   , TraceState(..)
@@ -59,21 +63,29 @@ module System.Hatrace
   , SyscallArgs(..)
   , sendSignal
   , doesProcessHaveChildren
+  , getFdPath
   -- * Re-exports
   , KnownSyscall(..)
   ) where
 
+import           Conduit (foldlC)
+import           Control.Arrow (second)
+import           Control.Monad (when)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
-import           Data.Bits ((.|.), shiftL, shiftR)
+import           Data.Bits ((.|.), (.&.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
+import           Data.Either (partitionEithers)
 import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
@@ -85,8 +97,9 @@ import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr)
 import           Foreign.Storable (peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
-import           System.Directory (doesFileExist, findExecutable)
+import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
+import           System.FilePath ((</>))
 import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
 import           System.Linux.Ptrace (TracedProcess(..), peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
 import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
@@ -94,6 +107,7 @@ import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
 import           System.Linux.Ptrace.Types (Regs(..))
 import           System.Linux.Ptrace.X86_64Regs (X86_64Regs(..))
 import           System.Linux.Ptrace.X86Regs (X86Regs(..))
+import           System.Posix.Files (readSymbolicLink)
 import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
 import qualified System.Posix.Signals as Signals
@@ -1014,6 +1028,139 @@ traceForkExecvFullPath args = do
     sourceTraceForkExecvFullPathWithSink args (printSyscallOrSignalNameConduit .| CL.sinkNull)
   return exitCode
 
+
+-- | Like the partial `T.decodeUtf8`, with `HasCallStack`.
+decodeUtf8OrError :: (HasCallStack) => ByteString -> Text
+decodeUtf8OrError bs = case T.decodeUtf8' bs of
+  Left err -> error $ "Could not decode as UTF-8: " ++ show err ++ "; ByteString was : " ++ show bs
+  Right text -> text
+
+
+getFdPath :: CPid -> CInt -> IO FilePath
+getFdPath pid fd = do
+  let procFdPath = "/proc/" ++ show pid ++ "/fd/" ++ show fd
+  readSymbolicLink procFdPath
+
+
+data FileWriteEvent
+  = FileOpen ByteString
+  | FileWrite
+  | FileClose
+  | FileRename ByteString -- ^ new (target) name
+  deriving (Eq, Ord, Show)
+
+-- NOTES:
+-- * the code doesn't register `open` syscalls for files opened as readonly,
+--   at the same time this filter isn't applied for other syscalls (close, rename)
+-- * only calls to `write` are currently used as a marker for writes and syscalls
+--   `pwrite`, `writev`, `pwritev` are not taken into account
+fileWritesConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (FilePath, FileWriteEvent) m ()
+fileWritesConduit = go
+  where
+    go =
+      await >>= \case
+        Just (pid, SyscallStop (SyscallExit (KnownSyscall syscall, syscallArgs))) -> do
+          detailedSyscallExit <- liftIO $ getSyscallExitDetails syscall syscallArgs pid
+          case detailedSyscallExit of
+            Right (DetailedSyscallExit_open SyscallExitDetails_open
+                   { enterDetail = SyscallEnterDetails_open { pathnameBS, flags }
+                   , fd }) ->
+              when (allowsWrites flags) $ yieldFdEvent pid fd (FileOpen pathnameBS)
+            Right (DetailedSyscallExit_openat SyscallExitDetails_openat
+                   { enterDetail = SyscallEnterDetails_openat { pathnameBS, flags }
+                   , fd }) ->
+              when (allowsWrites flags) $ yieldFdEvent pid fd (FileOpen pathnameBS)
+            Right (DetailedSyscallExit_creat SyscallExitDetails_creat
+                   { enterDetail = SyscallEnterDetails_creat { pathnameBS }
+                   , fd }) ->
+              -- creat uses O_WRONLY
+              yieldFdEvent pid fd (FileOpen pathnameBS)
+            _ -> return ()
+          go
+        Just (pid, SyscallStop (SyscallEnter (KnownSyscall syscall, syscallArgs))) -> do
+          detailedSyscallEnter <- liftIO $ getSyscallEnterDetails syscall syscallArgs pid
+          case detailedSyscallEnter of
+            DetailedSyscallEnter_write SyscallEnterDetails_write { fd } ->
+              yieldFdEvent pid fd FileWrite
+            DetailedSyscallEnter_close SyscallEnterDetails_close { fd } ->
+              yieldFdEvent pid fd FileClose
+            DetailedSyscallEnter_rename SyscallEnterDetails_rename { oldpathBS, newpathBS } -> do
+              path <- liftIO $ resolveToPidCwd pid (T.unpack $ decodeUtf8OrError oldpathBS)
+              yield (path, FileRename newpathBS)
+            _ -> return ()
+          go
+        Just _ ->
+          go -- ignore other events
+        Nothing ->
+          return ()
+    yieldFdEvent pid fd event = do
+      path <- liftIO $ getFdPath pid fd
+      yield (path, event)
+    o_WRONLY = 0o00000001
+    o_RDWR   = 0o00000002
+    allowsWrites flags = flags .&. writeModes /= 0
+    writeModes = o_WRONLY .|. o_RDWR
+
+resolveToPidCwd :: Show a => a -> FilePath -> IO FilePath
+resolveToPidCwd pid path = do
+  let procFdPath = "/proc/" ++ show pid ++ "/cwd"
+  wd <- liftIO $ readSymbolicLink procFdPath
+  canonicalizePath $ wd </> path
+
+
+data FileWriteBehavior
+  = NoWrites
+  | NonatomicWrite
+  | AtomicWrite FilePath
+  -- ^ path tells temporary file name that was used
+  | Unexpected String
+  deriving (Eq, Ord, Show)
+
+analyzeWrites :: [FileWriteEvent] -> FileWriteBehavior
+analyzeWrites events = checkOpen events
+  where
+    checkOpen [] = NoWrites
+    -- we could see a close syscall for a file opened in readonly mode
+    -- thus we just ignore it
+    checkOpen (FileClose:es) = checkOpen es
+    checkOpen (FileOpen _:es) = checkWrites es
+    checkOpen (e:_) = unexpected "FileOpen" e
+    checkWrites [] = Unexpected $ "FileClose was expected but not seen"
+    checkWrites (FileClose:es) = checkOpen es
+    checkWrites (FileWrite:es) = checkWrites' es
+    checkWrites (e: _) = unexpected "FileClose or FileWrite" e
+    checkWrites' [] = Unexpected $ "FileClose was expected but not seen"
+    checkWrites' (FileWrite:es) = checkWrites' es
+    checkWrites' (FileClose:es) = checkRename es
+    checkWrites' (e: _) = unexpected "FileClose or FileWrite" e
+    checkRename (FileRename path:es) =
+      case checkOpen es of
+        NoWrites ->
+          -- we write original path here which swapped
+          -- with oldpath in `atomicWritesSink`
+          AtomicWrite (T.unpack $ decodeUtf8OrError path)
+        other ->
+          other
+    checkRename es =
+      case checkOpen es of
+        NoWrites -> NonatomicWrite
+        other -> other
+    unexpected expected real =
+      Unexpected $ "expected " ++ expected ++ ", but " ++
+                   show real ++ " was seen"
+
+atomicWritesSink :: (MonadIO m) => ConduitT (CPid, TraceEvent) Void m (Map FilePath FileWriteBehavior)
+atomicWritesSink =
+  extract <$> (fileWritesConduit .| foldlC collectWrite mempty)
+  where
+    collectWrite m (fp, e) = Map.alter (Just . maybe [e] (e:)) fp m
+    extract m =
+      let (noRenames, renames) =
+            partitionEithers . map (analyzeWrites' . second reverse) $ Map.toList m
+      in Map.fromList noRenames <> Map.fromList (map (second AtomicWrite) renames)
+    analyzeWrites' (src, es) = case analyzeWrites es of
+      AtomicWrite target -> Right (target, src)
+      other -> Left (src, other)
 
 -- | Passes through all syscalls and signals that come by,
 -- printing them, including details where available.
