@@ -998,15 +998,16 @@ getExePath pid = do
 
 
 data FileWriteEvent
-  = FileOpen ByteString
+  = FileOpen ByteString -- ^ name used to open the file
   | FileWrite
   | FileClose
   | FileRename ByteString -- ^ new (target) name
   deriving (Eq, Ord, Show)
 
+-- | Uses raw trace events to produces more focused events aimed at analysing file writes.
+-- Output events are accompanied by corresponding absolute file paths.
+--
 -- NOTES:
--- * the code doesn't register `open` syscalls for files opened as readonly,
---   at the same time this filter isn't applied for other syscalls (close, rename)
 -- * only calls to `write` are currently used as a marker for writes and syscalls
 --   `pwrite`, `writev`, `pwritev` are not taken into account
 fileWritesConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (FilePath, FileWriteEvent) m ()
@@ -1066,48 +1067,67 @@ data FileWriteBehavior
   | Unexpected String
   deriving (Eq, Ord, Show)
 
+-- uses state machine implemented as recursive functions
 analyzeWrites :: [FileWriteEvent] -> FileWriteBehavior
-analyzeWrites events = checkOpen events
+analyzeWrites es = checkOpen es
   where
-    checkOpen [] = NoWrites
-    -- we could see a close syscall for a file opened in readonly mode
-    -- thus we just ignore it
-    checkOpen (FileClose:es) = checkOpen es
-    checkOpen (FileOpen _:es) = checkWrites es
-    checkOpen (e:_) = unexpected "FileOpen" e
-    checkWrites [] = Unexpected $ "FileClose was expected but not seen"
-    checkWrites (FileClose:es) = checkOpen es
-    checkWrites (FileWrite:es) = checkWrites' es
-    checkWrites (e: _) = unexpected "FileClose or FileWrite" e
-    checkWrites' [] = Unexpected $ "FileClose was expected but not seen"
-    checkWrites' (FileWrite:es) = checkWrites' es
-    checkWrites' (FileClose:es) = checkRename es
-    checkWrites' (e: _) = unexpected "FileClose or FileWrite" e
-    checkRename (FileRename path:es) =
-      case checkOpen es of
-        NoWrites ->
-          -- we write original path here which swapped
-          -- with oldpath in `atomicWritesSink`
-          AtomicWrite (T.unpack $ decodeUtf8OrError path)
-        other ->
-          other
-    checkRename es =
-      case checkOpen es of
-        NoWrites -> NonatomicWrite
-        other -> other
-    unexpected expected real =
+    checkOpen events =
+      case events of
+        [] -> NoWrites
+        -- we could see a `close` syscall for a pipe descriptor
+        -- with no `open` for it thus we just ignore it
+        FileClose : rest -> checkOpen rest
+        FileOpen _ : rest -> checkWrites rest
+        unexpected : _ -> unexpectedEvent "FileOpen" unexpected
+    checkWrites events =
+      case events of
+        [] -> Unexpected $ "FileClose was expected but not seen"
+        FileClose : rest -> checkOpen rest
+        FileWrite : rest -> checkAfterWrite rest
+        unexpected : _ -> unexpectedEvent "FileClose or FileWrite" unexpected
+    checkAfterWrite events =
+      case events of
+        [] -> Unexpected $ "FileClose was expected but not seen"
+        FileWrite : rest -> checkAfterWrite rest
+        FileClose : rest -> checkRename rest
+        unexpected : _ -> unexpectedEvent "FileClose or FileWrite" unexpected
+    -- when it happens that a path gets more than 1 sequence open-write-close
+    -- for it we need to check whethere there was a `rename` after the 1st one
+    -- and then check the result of the next one and combine them accordingly
+    -- e.g. atomic + non-atomic -> non-atomic
+    checkRename events =
+      case events of
+        FileRename path : rest ->
+          case checkOpen rest of
+            NoWrites ->
+              -- we write original path here which swapped
+              -- with oldpath in `atomicWritesSink`
+              AtomicWrite (T.unpack $ decodeUtf8OrError path)
+            other ->
+              other
+        noRenames ->
+          case checkOpen noRenames of
+            NoWrites -> NonatomicWrite
+            other -> other
+    unexpectedEvent expected real =
       Unexpected $ "expected " ++ expected ++ ", but " ++
                    show real ++ " was seen"
 
 atomicWritesSink :: (MonadIO m) => ConduitT (CPid, TraceEvent) Void m (Map FilePath FileWriteBehavior)
 atomicWritesSink =
-  extract <$> (fileWritesConduit .| foldlC collectWrite mempty)
+  extract <$> (fileWritesConduit .| foldlC collectWrite Map.empty)
   where
+    collectWrite :: Map FilePath [FileWriteEvent] -> (FilePath, FileWriteEvent) -> Map FilePath [FileWriteEvent]
     collectWrite m (fp, e) = Map.alter (Just . maybe [e] (e:)) fp m
+    extract :: Map FilePath [FileWriteEvent] -> Map FilePath FileWriteBehavior
     extract m =
       let (noRenames, renames) =
             partitionEithers . map (analyzeWrites' . second reverse) $ Map.toList m
       in Map.fromList noRenames <> Map.fromList (map (second AtomicWrite) renames)
+    -- this function (in addition to what `analyzeWrites` does) treats atomic writes
+    -- in a special way: those include a rename and we need to put atomic writes under
+    -- a path which is a target of a corresponding rename
+    -- so in the end we swap path in `AtomicWrite` and its corresponding map key
     analyzeWrites' (src, es) = case analyzeWrites es of
       AtomicWrite target -> Right (target, src)
       other -> Left (src, other)
