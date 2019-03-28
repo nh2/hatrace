@@ -365,6 +365,16 @@ spec = before_ assertNoChildren $ do
         -- Concatenate because there may be short reads and retries.
         BS.concat stdinReads `shouldBe` "hello\n"
 
+    describe "exit_group" $ do
+
+       it "Syscall_exit_group is identified" $ do
+         argv <- procToArgv "true" []
+         (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+
+         let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
+         exitCode `shouldBe` ExitSuccess
+         syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_exit_group `elem` xs)
+
     describe "execve" $ do
 
       let runExecveProgram :: FilePath -> FilePath -> IO (ExitCode, [SyscallExitDetails_execve])
