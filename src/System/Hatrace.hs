@@ -1571,10 +1571,10 @@ getEnteredSyscall cpid = do
       -- There are 4 ways in total you can make a syscall
       -- (see https://reverseengineering.stackexchange.com/questions/2869/how-to-use-sysenter-under-linux/2894#2894):
       --
-      -- * `int $0x80`
-      -- * `sysenter` (i586)
-      -- * `call *%gs:0x10` (vdso trampoline)
-      -- * `syscall` (amd64)
+      -- - `int $0x80`
+      -- - `sysenter` (i586)
+      -- - `call *%gs:0x10` (vdso trampoline)
+      -- - `syscall` (amd64)
       --
       -- On 32-bit x86 Linux the vdso trampoline prefers `sysenter` over
       -- `int 0x80` when possible.
