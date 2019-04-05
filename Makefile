@@ -7,6 +7,7 @@ EXAMPLE_PROGRAMS += example-programs-build/execve
 EXAMPLE_PROGRAMS += example-programs-build/execve-linux-null-envp
 EXAMPLE_PROGRAMS += example-programs-build/atomic-write
 EXAMPLE_PROGRAMS += example-programs-build/write-EBADF
+EXAMPLE_PROGRAMS += example-programs-build/access-itself
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
@@ -54,3 +55,7 @@ example-programs-build/atomic-write: example-programs/atomic-write.c
 example-programs-build/write-EBADF: example-programs/write-EBADF.c
 	mkdir -p example-programs-build
 	gcc -static -std=c99 -Wall -Werror example-programs/write-EBADF.c -o example-programs-build/write-EBADF
+
+example-programs-build/access-itself: example-programs/access-itself.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/access-itself.c -o example-programs-build/access-itself

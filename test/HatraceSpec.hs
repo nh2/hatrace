@@ -529,3 +529,23 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         pipeEvents `shouldSatisfy` (not . null)
+
+    describe "access" $ do
+      it "seen when invoked in a program" $ do
+        let accessItself = "example-programs-build/access-itself"
+        callProcess "make" ["--quiet", accessItself]
+        argv <- procToArgv accessItself []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let accessModesRequested =
+              [ mode
+              | (_pid
+                , Right (DetailedSyscallExit_access
+                         SyscallExitDetails_access
+                         { enterDetail = SyscallEnterDetails_access{ mode } })
+                ) <- events
+              ]
+            x_OK = 1
+        accessModesRequested `shouldBe` [x_OK]
