@@ -120,6 +120,7 @@ import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.Types
 
 
 mapLeft :: (a1 -> a2) -> Either a1 b -> Either a2 b
@@ -515,6 +516,7 @@ data SyscallEnterDetails_access = SyscallEnterDetails_access
   { pathname :: Ptr CChar
   , mode :: CInt
   -- Peeked details
+  , accessMode :: FileAccessMode
   , pathnameBS :: ByteString
   } deriving (Eq, Ord, Show)
 
@@ -530,6 +532,7 @@ data SyscallEnterDetails_faccessat = SyscallEnterDetails_faccessat
   , mode :: CInt
   , flags :: CInt
   -- Peeked details
+  , accessMode :: FileAccessMode
   , pathnameBS :: ByteString
   } deriving (Eq, Ord, Show)
 
@@ -650,6 +653,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_access $ SyscallEnterDetails_access
       { pathname = pathnamePtr
       , mode = fromIntegral mode
+      , accessMode = fromCInt (fromIntegral mode)
       , pathnameBS
       }
   Syscall_faccessat -> do
@@ -660,6 +664,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { dirfd = fromIntegral dirfd
       , pathname = pathnamePtr
       , mode = fromIntegral mode
+      , accessMode = fromCInt (fromIntegral mode)
       , pathnameBS
       , flags = fromIntegral flags
       }
@@ -933,12 +938,12 @@ formatDetailedSyscallEnter = \case
       "pipe([], " ++ show flags ++ ")"
 
   DetailedSyscallEnter_access
-    SyscallEnterDetails_access{ pathnameBS, mode } ->
-      "access(" ++ show pathnameBS ++ ", " ++ show mode ++ ")"
+    SyscallEnterDetails_access{ pathnameBS, accessMode } ->
+      "access(" ++ show pathnameBS ++ ", " ++ show accessMode ++ ")"
 
   DetailedSyscallEnter_faccessat
-    SyscallEnterDetails_faccessat{ dirfd, pathnameBS, mode, flags } ->
-      "faccessat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ show mode ++ ", " ++ show flags ++")"
+    SyscallEnterDetails_faccessat{ dirfd, pathnameBS, accessMode, flags } ->
+      "faccessat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ show accessMode ++ ", " ++ show flags ++")"
 
   DetailedSyscallEnter_write
     SyscallEnterDetails_write{ fd, bufContents, count } ->
@@ -1013,13 +1018,13 @@ formatDetailedSyscallExit = \case
       "pipe([" ++ show readfd ++ ", " ++ show writefd ++ "], " ++ show flags ++ ")"
 
   DetailedSyscallExit_access
-    SyscallExitDetails_access{ enterDetail = SyscallEnterDetails_access{ pathnameBS, mode } } ->
-      "access(" ++ show pathnameBS ++ ", " ++ show mode ++ ")"
+    SyscallExitDetails_access{ enterDetail = SyscallEnterDetails_access{ pathnameBS, accessMode } } ->
+      "access(" ++ show pathnameBS ++ ", " ++ show accessMode ++ ")"
 
   DetailedSyscallExit_faccessat
     SyscallExitDetails_faccessat
-    { enterDetail = SyscallEnterDetails_faccessat{ dirfd, pathnameBS, mode, flags } } ->
-      "faccessat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ show mode ++ ", " ++ show flags ++ ")"
+    { enterDetail = SyscallEnterDetails_faccessat{ dirfd, pathnameBS, accessMode, flags } } ->
+      "faccessat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ show accessMode ++ ", " ++ show flags ++ ")"
 
   DetailedSyscallExit_write
     SyscallExitDetails_write{ enterDetail = SyscallEnterDetails_write{ fd, bufContents, count }, writtenCount } ->
