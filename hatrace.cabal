@@ -32,6 +32,7 @@ library
                        System.Hatrace.SyscallTables
                        System.Hatrace.SyscallTables.Generated
                        System.Hatrace.SyscallTables.Util
+                       System.Hatrace.Types
   build-depends:       base >= 4.7 && < 5
                      , bytestring
                      , conduit
