@@ -53,6 +53,8 @@ It is recommended to file an issue when picking up one of the tasks to coordinat
   * [ ] Coloured output
   * [ ] Timing `strace -ttt` and `-T`
   * [ ] special run modes tailored to specific tasks (e.g. execve tree)
+    * [ ] Show hanging syscalls
+    * [ ] Filter away GHC's spammy output around `sched_yield`, `futex` and signals
 * [ ] Support for setting options (for example enabling/disabling tracing into subprocesses, like `strace -f`)
 * [ ] Equivalent to `strace -y` (tracking origin of file descriptors, printing paths)
 * [ ] Equivalent to `strace -c` (keeping counts, summary statistics)
