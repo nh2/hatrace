@@ -49,6 +49,8 @@ module System.Hatrace
   , SyscallExitDetails_exit(..)
   , SyscallEnterDetails_exit_group(..)
   , SyscallExitDetails_exit_group(..)
+  , SyscallEnterDetails_connect(..)
+  , SyscallExitDetails_connect(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -92,13 +94,13 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
-import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
+import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
 import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr)
-import           Foreign.Storable (peekByteOff, sizeOf)
+import           Foreign.Storable (peek, peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
@@ -541,6 +543,19 @@ data SyscallExitDetails_faccessat = SyscallExitDetails_faccessat
   { enterDetail :: SyscallEnterDetails_faccessat
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_connect = SyscallEnterDetails_connect
+  { sockfd :: CInt
+  , addr :: Ptr Void
+  , addrlen :: CUInt
+  -- Peeked details
+  , sockAddr :: SockAddr
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_connect = SyscallExitDetails_connect
+  { enterDetail :: SyscallEnterDetails_connect
+  , sockfd :: CInt
+  } deriving (Eq, Ord, Show)
 
 data SyscallEnterDetails_execve = SyscallEnterDetails_execve
   { filename :: Ptr CChar
@@ -566,6 +581,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_pipe SyscallEnterDetails_pipe
   | DetailedSyscallEnter_pipe2 SyscallEnterDetails_pipe2
   | DetailedSyscallEnter_access SyscallEnterDetails_access
+  | DetailedSyscallEnter_connect SyscallEnterDetails_connect
   | DetailedSyscallEnter_faccessat SyscallEnterDetails_faccessat
   | DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
@@ -587,6 +603,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_pipe SyscallExitDetails_pipe
   | DetailedSyscallExit_pipe2 SyscallExitDetails_pipe2
   | DetailedSyscallExit_access SyscallExitDetails_access
+  | DetailedSyscallExit_connect SyscallExitDetails_connect
   | DetailedSyscallExit_faccessat SyscallExitDetails_faccessat
   | DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
@@ -772,6 +789,15 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
   Syscall_exit -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit $ SyscallEnterDetails_exit { status = fromIntegral status }
+  Syscall_connect -> do
+    let SyscallArgs{ arg0 = sockfd, arg1 = addr, arg2 = addrlen} = syscallArgs
+    sockAddr <- (peek (word64ToPtr addr) :: IO SockAddr)
+    pure $ DetailedSyscallEnter_connect $ SyscallEnterDetails_connect
+      { sockfd = fromIntegral sockfd
+      , addr = word64ToPtr addr
+      , addrlen = fromIntegral addrlen
+      , sockAddr = sockAddr
+      }
   Syscall_exit_group -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit_group $ SyscallEnterDetails_exit_group { status = fromIntegral status }
@@ -886,6 +912,10 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
               enterDetail@SyscallEnterDetails_exit_group{} -> do
                 pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
 
+            DetailedSyscallEnter_connect
+              enterDetail@SyscallEnterDetails_connect{} -> do
+                pure $ DetailedSyscallExit_connect $ SyscallExitDetails_connect { enterDetail, sockfd = fromIntegral result }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -983,6 +1013,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_exit_group{ status } ->
       "exit_group(" ++ show status ++ ")"
 
+  DetailedSyscallEnter_connect
+    SyscallEnterDetails_connect {sockfd, sockAddr, addrlen} ->
+      "connect(" ++ show sockfd ++ ", " ++ show sockAddr ++ ", " ++ show addrlen ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1070,6 +1104,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_exit_group
     SyscallExitDetails_exit_group{ enterDetail = SyscallEnterDetails_exit_group{ status }} ->
       "exit_group(" ++ show status ++ ")"
+
+  DetailedSyscallExit_connect
+    SyscallExitDetails_connect { enterDetail = SyscallEnterDetails_connect{sockfd, sockAddr, addrlen}} ->
+      "connect(" ++ show sockfd ++ show sockAddr ++ ", " ++ show addrlen ++ ") = " ++ show sockfd
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
