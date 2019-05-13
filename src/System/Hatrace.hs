@@ -100,7 +100,7 @@ import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr)
-import           Foreign.Storable (peek, peekByteOff, sizeOf)
+import           Foreign.Storable (peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
@@ -109,6 +109,7 @@ import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
 import           System.Linux.Ptrace (TracedProcess(..), peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
 import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
 import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
+import qualified System.Linux.Ptrace as Ptrace
 import           System.Linux.Ptrace.Types (Regs(..))
 import           System.Linux.Ptrace.X86_64Regs (X86_64Regs(..))
 import           System.Linux.Ptrace.X86Regs (X86Regs(..))
@@ -123,7 +124,6 @@ import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
-
 
 mapLeft :: (a1 -> a2) -> Either a1 b -> Either a2 b
 mapLeft f = either (Left . f) Right
@@ -791,7 +791,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_exit $ SyscallEnterDetails_exit { status = fromIntegral status }
   Syscall_connect -> do
     let SyscallArgs{ arg0 = sockfd, arg1 = addr, arg2 = addrlen} = syscallArgs
-    sockAddr <- (peek (word64ToPtr addr) :: IO SockAddr)
+    sockAddr <- (Ptrace.peek (TracedProcess pid) (word64ToPtr addr) :: IO SockAddr)
     pure $ DetailedSyscallEnter_connect $ SyscallEnterDetails_connect
       { sockfd = fromIntegral sockfd
       , addr = word64ToPtr addr
