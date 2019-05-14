@@ -5,6 +5,13 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+// On Linux the request is `PTRACE_TRACEME`,
+// on other platforms it is `PT_TRACE_ME`.
+// (Although modern implementations of libc define both.)
+#ifndef PT_TRACE_ME
+  #define PT_TRACE_ME PTRACE_TRACEME
+#endif
+
 /* Like the fork() and it uses, on failure this function
    returns -1 and sets errno.
    On success it returns the PID of the child process.
@@ -34,7 +41,7 @@ pid_t fork_exec_with_ptrace(int argc, char **argv)
     args[argc] = NULL;
 
     // For PTRACE_TRACEME, all other arguments are ignored.
-    long ptrace_retval = ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+    long ptrace_retval = ptrace(PT_TRACE_ME, 0, NULL, NULL);
     if (ptrace_retval != 0)
     {
       perror("ptrace(PTRACE_TRACEME)");
