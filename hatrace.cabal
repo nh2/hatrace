@@ -29,6 +29,7 @@ library
   c-sources:           cbits/fork-exec-ptrace.c
   exposed-modules:     System.Hatrace
                        System.Hatrace.Main
+                       System.Hatrace.SignalMap
                        System.Hatrace.SyscallTables
                        System.Hatrace.SyscallTables.Generated
                        System.Hatrace.SyscallTables.Util
