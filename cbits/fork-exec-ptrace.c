@@ -13,6 +13,14 @@
   #define PT_TRACE_ME PTRACE_TRACEME
 #endif
 
+// On Linux the `data` parameter has type `void *`,
+// on other platforms it is an `int`.
+#if __linux__
+  #define PTRACE_EMPTY_DATA NULL
+#else
+  #define PTRACE_EMPTY_DATA 0
+#endif
+
 /* Like the fork() and it uses, on failure this function
    returns -1 and sets errno.
    On success it returns the PID of the child process.
@@ -42,7 +50,7 @@ pid_t fork_exec_with_ptrace(int argc, char **argv)
     args[argc] = NULL;
 
     // For PTRACE_TRACEME, all other arguments are ignored.
-    long ptrace_retval = ptrace(PT_TRACE_ME, 0, NULL, NULL);
+    long ptrace_retval = ptrace(PT_TRACE_ME, 0, NULL, PTRACE_EMPTY_DATA);
     if (ptrace_retval != 0)
     {
       perror("ptrace(PTRACE_TRACEME)");
