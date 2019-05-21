@@ -43,6 +43,14 @@ module System.Hatrace
   , SyscallExitDetails_renameat(..)
   , SyscallEnterDetails_renameat2(..)
   , SyscallExitDetails_renameat2(..)
+  , SyscallEnterDetails_stat(..)
+  , SyscallExitDetails_stat(..)
+  , SyscallEnterDetails_fstat(..)
+  , SyscallExitDetails_fstat(..)
+  , SyscallEnterDetails_lstat(..)
+  , SyscallExitDetails_lstat(..)
+  , SyscallEnterDetails_newfstatat(..)
+  , SyscallExitDetails_newfstatat(..)
   , SyscallEnterDetails_execve(..)
   , SyscallExitDetails_execve(..)
   , SyscallEnterDetails_exit(..)
@@ -105,6 +113,7 @@ import           System.Exit (ExitCode(..), die)
 import           System.FilePath ((</>))
 import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
 import           System.Linux.Ptrace (TracedProcess(..), peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
+import qualified System.Linux.Ptrace as Ptrace
 import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
 import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
 import           System.Linux.Ptrace.Types (Regs(..))
@@ -542,6 +551,66 @@ data SyscallExitDetails_faccessat = SyscallExitDetails_faccessat
   } deriving (Eq, Ord, Show)
 
 
+data SyscallEnterDetails_stat = SyscallEnterDetails_stat
+  { pathname :: Ptr CChar
+  , statbuf :: Ptr StatStruct
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_stat = SyscallExitDetails_stat
+  { enterDetail :: SyscallEnterDetails_stat
+  -- Peeked details
+  , stat :: StatStruct
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallEnterDetails_fstat = SyscallEnterDetails_fstat
+  { fd :: CInt
+  , statbuf :: Ptr StatStruct
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_fstat = SyscallExitDetails_fstat
+  { enterDetail :: SyscallEnterDetails_fstat
+  -- Peeked details
+  , stat :: StatStruct
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallEnterDetails_lstat = SyscallEnterDetails_lstat
+  { pathname :: Ptr CChar
+  , statbuf :: Ptr StatStruct
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_lstat = SyscallExitDetails_lstat
+  { enterDetail :: SyscallEnterDetails_lstat
+  -- Peeked details
+  , stat :: StatStruct
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallEnterDetails_newfstatat = SyscallEnterDetails_newfstatat
+  { dirfd :: CInt
+  , pathname :: Ptr CChar
+  , statbuf :: Ptr StatStruct
+  , flags :: CInt
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_newfstatat = SyscallExitDetails_newfstatat
+  { enterDetail :: SyscallEnterDetails_newfstatat
+  -- Peeked details
+  , stat :: StatStruct
+  } deriving (Eq, Ord, Show)
+
+
 data SyscallEnterDetails_execve = SyscallEnterDetails_execve
   { filename :: Ptr CChar
   , argv :: Ptr (Ptr CChar)
@@ -574,6 +643,10 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_rename SyscallEnterDetails_rename
   | DetailedSyscallEnter_renameat SyscallEnterDetails_renameat
   | DetailedSyscallEnter_renameat2 SyscallEnterDetails_renameat2
+  | DetailedSyscallEnter_stat SyscallEnterDetails_stat
+  | DetailedSyscallEnter_fstat SyscallEnterDetails_fstat
+  | DetailedSyscallEnter_lstat SyscallEnterDetails_lstat
+  | DetailedSyscallEnter_newfstatat SyscallEnterDetails_newfstatat
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
@@ -595,6 +668,10 @@ data DetailedSyscallExit
   | DetailedSyscallExit_rename SyscallExitDetails_rename
   | DetailedSyscallExit_renameat SyscallExitDetails_renameat
   | DetailedSyscallExit_renameat2 SyscallExitDetails_renameat2
+  | DetailedSyscallExit_stat SyscallExitDetails_stat
+  | DetailedSyscallExit_fstat SyscallExitDetails_fstat
+  | DetailedSyscallExit_lstat SyscallExitDetails_lstat
+  | DetailedSyscallExit_newfstatat SyscallExitDetails_newfstatat
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
@@ -769,6 +846,45 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , newpathBS
       , flags = fromIntegral flags
       }
+  Syscall_stat -> do
+    let SyscallArgs{ arg0 = pathnameAddr, arg1 = statbufAddr } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    let statbufPtr = word64ToPtr statbufAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_stat $ SyscallEnterDetails_stat
+      { pathname = pathnamePtr
+      , statbuf = statbufPtr
+      , pathnameBS
+      }
+  Syscall_fstat -> do
+    let SyscallArgs{ arg0 = fd, arg1 = statbufAddr } = syscallArgs
+    let statbufPtr = word64ToPtr statbufAddr
+    pure $ DetailedSyscallEnter_fstat $ SyscallEnterDetails_fstat
+      { fd = fromIntegral fd
+      , statbuf = statbufPtr
+      }
+  Syscall_lstat -> do
+    let SyscallArgs{ arg0 = pathnameAddr, arg1 = statbufAddr } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    let statbufPtr = word64ToPtr statbufAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_lstat $ SyscallEnterDetails_lstat
+      { pathname = pathnamePtr
+      , statbuf = statbufPtr
+      , pathnameBS
+      }
+  Syscall_newfstatat -> do
+    let SyscallArgs{ arg0 = dirfd, arg1 = pathnameAddr, arg2 = statbufAddr, arg3 = flags } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    let statbufPtr = word64ToPtr statbufAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_newfstatat $ SyscallEnterDetails_newfstatat
+      { dirfd = fromIntegral dirfd
+      , pathname = pathnamePtr
+      , statbuf = statbufPtr
+      , flags = fromIntegral flags
+      , pathnameBS
+      }
   Syscall_exit -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit $ SyscallEnterDetails_exit { status = fromIntegral status }
@@ -878,6 +994,30 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_renameat2 $
                   SyscallExitDetails_renameat2{ enterDetail }
 
+            DetailedSyscallEnter_stat
+              enterDetail@SyscallEnterDetails_stat{statbuf} -> do
+                stat <- Ptrace.peek (TracedProcess pid) statbuf
+                pure $ DetailedSyscallExit_stat $
+                  SyscallExitDetails_stat{ enterDetail, stat }
+
+            DetailedSyscallEnter_fstat
+              enterDetail@SyscallEnterDetails_fstat{statbuf} -> do
+                stat <- Ptrace.peek (TracedProcess pid) statbuf
+                pure $ DetailedSyscallExit_fstat $
+                  SyscallExitDetails_fstat{ enterDetail, stat }
+
+            DetailedSyscallEnter_lstat
+              enterDetail@SyscallEnterDetails_lstat{statbuf} -> do
+                stat <- Ptrace.peek (TracedProcess pid) statbuf
+                pure $ DetailedSyscallExit_lstat $
+                  SyscallExitDetails_lstat{ enterDetail, stat }
+
+            DetailedSyscallEnter_newfstatat
+              enterDetail@SyscallEnterDetails_newfstatat{statbuf} -> do
+                stat <- Ptrace.peek (TracedProcess pid) statbuf
+                pure $ DetailedSyscallExit_newfstatat $
+                  SyscallExitDetails_newfstatat{ enterDetail, stat }
+
             DetailedSyscallEnter_exit
               enterDetail@SyscallEnterDetails_exit{} -> do
                 pure $ DetailedSyscallExit_exit $ SyscallExitDetails_exit { enterDetail }
@@ -971,6 +1111,22 @@ formatDetailedSyscallEnter = \case
       "renameat2(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
                  ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ", " ++ show flags ++ ")"
 
+  DetailedSyscallEnter_stat
+    SyscallEnterDetails_stat{ pathnameBS } ->
+      "stat(" ++ show pathnameBS ++ ", struct stat *statbuf)"
+
+  DetailedSyscallEnter_fstat
+    SyscallEnterDetails_fstat{ fd } ->
+      "fstat(" ++ show fd ++ ", struct stat *statbuf)"
+
+  DetailedSyscallEnter_lstat
+    SyscallEnterDetails_lstat{ pathnameBS } ->
+      "lstat(" ++ show pathnameBS ++ ", struct stat *statbuf)"
+
+  DetailedSyscallEnter_newfstatat
+    SyscallEnterDetails_newfstatat{ dirfd, pathnameBS, flags } ->
+      "newfstatat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", struct stat *statbuf, " ++ show flags ++ ")"
+
   DetailedSyscallEnter_execve
     SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
       "execve(" ++ show filenameBS ++ ", " ++ show argvList ++ ", " ++ show envpList ++ ")"
@@ -1053,6 +1209,22 @@ formatDetailedSyscallExit = \case
     { enterDetail = SyscallEnterDetails_renameat2{ olddirfd, oldpathBS, newdirfd, newpathBS, flags } } ->
       "renameat2(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
                  ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ", " ++ show flags ++ ")"
+
+  DetailedSyscallExit_stat
+    SyscallExitDetails_stat{ enterDetail = SyscallEnterDetails_stat{ pathnameBS }, stat } ->
+      "stat(" ++ show pathnameBS ++ ", " ++ hShow stat ++ ")"
+
+  DetailedSyscallExit_fstat
+    SyscallExitDetails_fstat{ enterDetail = SyscallEnterDetails_fstat{ fd }, stat } ->
+      "fstat(" ++ show fd ++ ", " ++ hShow stat ++ ")"
+
+  DetailedSyscallExit_lstat
+    SyscallExitDetails_lstat{ enterDetail = SyscallEnterDetails_lstat{ pathnameBS }, stat } ->
+      "lstat(" ++ show pathnameBS ++ ", " ++ hShow stat ++ ")"
+
+  DetailedSyscallExit_newfstatat
+    SyscallExitDetails_newfstatat{ enterDetail = SyscallEnterDetails_newfstatat{ dirfd, pathnameBS, flags }, stat } ->
+      "newfstatat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ hShow stat ++ ", " ++ show flags ++ ")"
 
   DetailedSyscallExit_execve
     SyscallExitDetails_execve{ optionalEnterDetail, execveResult } ->
