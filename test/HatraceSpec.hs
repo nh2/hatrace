@@ -549,3 +549,20 @@ spec = before_ assertNoChildren $ do
               ]
             x_OK = 1
         accessModesRequested `shouldBe` [x_OK]
+
+    describe "lstat" $ do
+      it "seen called by stat executable" $ do
+        argv <- procToArgv "stat" ["/dev/null"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let pathsLstatRequested =
+              [ pathnameBS
+              | (_pid
+                , Right (DetailedSyscallExit_lstat
+                         SyscallExitDetails_lstat
+                         { enterDetail = SyscallEnterDetails_lstat{ pathnameBS } })
+                ) <- events
+              ]
+        pathsLstatRequested `shouldSatisfy` ("/dev/null" `elem`)
