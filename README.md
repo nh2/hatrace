@@ -62,6 +62,7 @@ It is recommended to file an issue when picking up one of the tasks to coordinat
 * [ ] Extraction of `PTRACE_EVENT` detail information (see section `PTRACE_SETOPTIONS` in `man 2 ptrace`)
 * [ ] Filtering based on string buffer contents
 * [ ] Handling of `exit()` of the direct child (grand-child daemonisation)
+* [ ] Don't die on `peekBytes` returning `EIO` when the tracee passes invalid memory to the kernel; instead, peek only what's possible and print some info. That makes it possible to correctly trace processes that rely on e.g. `SIGSEGV` handlers.
 * [ ] Re-using strace's test suite for per-syscall tests
 * [ ] other TODOs in the code
 * Use it to do specific investigations in other programs:
