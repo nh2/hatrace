@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <sys/socket.h>
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -6,11 +7,15 @@ module System.Hatrace.Types
   , fileExistence
   , CIntRepresentable(..)
   , HatraceShow(..)
+  , SockAddr(..)
   ) where
 
 import           Data.Bits
 import           Data.List (intercalate)
-import           Foreign.C.Types (CInt(..))
+import           Foreign.C.Types (CInt(..), CUInt(..))
+import           Foreign.C.String (CString, peekCString, newCString)
+import           Foreign.Storable (Storable(..))
+
 
 -- | Helper type class for int-sized enum-like types
 class CIntRepresentable a where
@@ -65,3 +70,22 @@ instance CIntRepresentable FileAccessMode where
                    }
     where
       accessBits = (#const R_OK) .|. (#const W_OK) .|. (#const X_OK)
+
+data SockAddr = SockAddr
+  { sa_family :: CUInt
+  , sa_data :: String
+  } deriving (Eq, Ord, Show)
+
+instance Storable SockAddr where
+  sizeOf _ = #{size struct sockaddr}
+  alignment _ = #{alignment struct sockaddr}
+  peek p = do
+    f <- #{peek struct sockaddr, sa_family} p
+    d <- (#{peek struct sockaddr, sa_family} p >>= peekCString)
+    return SockAddr { sa_family = f
+                    , sa_data = d
+                    }
+  poke p sockAddr = do
+    addr <- newCString $ sa_data sockAddr
+    #{poke struct sockaddr, sa_family} p $ sa_family sockAddr
+    #{poke struct sockaddr, sa_data} p addr
