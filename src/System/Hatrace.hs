@@ -790,12 +790,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit $ SyscallEnterDetails_exit { status = fromIntegral status }
   Syscall_connect -> do
-    let SyscallArgs{ arg0 = sockfd, arg1 = addr, arg2 = addrlen} = syscallArgs
-    sockAddr <- (Ptrace.peek (TracedProcess pid) (word64ToPtr addr) :: IO SockAddr)
+    let SyscallArgs{ arg0 = sockfd, arg1 = addr, arg2 = addrLen} = syscallArgs
+    let addrPtr = word64ToPtr addr
+    sockAddr <- wrapPeekVariableLength (TracedProcess pid) (word64ToPtr addr) addrLen peekSockAddr
     pure $ DetailedSyscallEnter_connect $ SyscallEnterDetails_connect
       { sockfd = fromIntegral sockfd
       , addr = word64ToPtr addr
-      , addrlen = fromIntegral addrlen
+      , addrlen = fromIntegral addrLen
       , sockAddr = sockAddr
       }
   Syscall_exit_group -> do
