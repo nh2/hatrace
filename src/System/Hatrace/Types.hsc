@@ -12,7 +12,7 @@ module System.Hatrace.Types
 
 import           Data.Bits
 import           Data.List (intercalate)
-import           Foreign.C.Types (CInt(..), CUInt(..))
+import           Foreign.C.Types (CInt(..), CUShort(..))
 import           Foreign.C.String (CString, peekCString, newCString)
 import           Foreign.Storable (Storable(..))
 
@@ -72,16 +72,72 @@ instance CIntRepresentable FileAccessMode where
       accessBits = (#const R_OK) .|. (#const W_OK) .|. (#const X_OK)
 
 data SockAddr = SockAddr
-  { sa_family :: CUInt
+  { sa_family :: CUShort
   , sa_data :: String
   } deriving (Eq, Ord, Show)
+
+
+
+data Inet6Addr = Inet6Adrr ByteString -- IPv6 address (16 bytes)
+
+data SockAddr = UnixSockAddr
+                {
+                  sun_family :: CUInt -- should be AF_UNIX
+                  sun_path :: String
+                }
+              | InetSockAddr
+                { sin_family :: CUINT -- should be AF_INET
+                , sin_port :: CUShort
+                , sin_addr :: CULong
+                , sin_zero :: String
+                }
+              | Inet6SockAddr
+                { sin6_family :: CUInt -- should be AF_INET6
+                , sin6_port :: CUShort -- port number
+                , sin6_flowinfo :: CULong -- IPv6 flow information
+                , sin6_addr :: Inet6Addr -- IPv6 address
+                , sin6_scope_id :: CUInt -- Scope ID
+                }
+              | NetlinkSockAddr
+                { nl_pad :: UShort
+                , nl_pid :: CInt
+                , nl_groups :: CUInt
+                }
+              | PacketSockAddr
+                { sll_protocol :: CUShort
+                , sll_ifindex :: Int
+                , sll_hatype :: CUShort
+                , sll_pttype :: Char
+                , sll_halen :: Char
+                , sll_len :: ByteString
+                }
+              | UnsupportedFamilySockAddr
+                { sa_family :: CUShort
+                }
+
+peekUnixSockAddr :: Pointer -> Int -> IO SockAddr
+peekUnixSockAddr p addrSize = do
+  family <- #{peek struct sockaddr_un, sa_family} p
+  case addrSize of
+    {#size struct sockaddr_un} -> return UnixSockAddr {
+                                          sun_family = family,
+                                          sun_path = ""
+                                          }
+    _ -> do
+
 
 instance Storable SockAddr where
   sizeOf _ = #{size struct sockaddr}
   alignment _ = #{alignment struct sockaddr}
   peek p = do
     f <- #{peek struct sockaddr, sa_family} p
-    d <- (#{peek struct sockaddr, sa_family} p >>= peekCString)
+    let d = case f of
+              (#const AF_UNIX) -> "Unix"
+              (#const AF_INET) -> "Inet"
+              (#const AF_INET6) -> "Inet6"
+              (#const AF_NETLINK) -> "Neetlink"
+              (#const AF_PACKET) -> "Packet"
+              _ -> "Unknown"
     return SockAddr { sa_family = f
                     , sa_data = d
                     }
