@@ -61,6 +61,7 @@ It is recommended to file an issue when picking up one of the tasks to coordinat
 * [ ] Something similar to `strace -y` but telling which PID is which executable from `/proc/PID/exe`
 * [ ] Extraction of `PTRACE_EVENT` detail information (see section `PTRACE_SETOPTIONS` in `man 2 ptrace`)
 * [ ] Filtering based on string buffer contents
+* [ ] PID remapping (e.g. to a range starting from 0) for better diffability of the output of multiple runs
 * [ ] Handling of `exit()` of the direct child (grand-child daemonisation)
 * [ ] Don't die on `peekBytes` returning `EIO` when the tracee passes invalid memory to the kernel; instead, peek only what's possible and print some info. That makes it possible to correctly trace processes that rely on e.g. `SIGSEGV` handlers.
 * [ ] Re-using strace's test suite for per-syscall tests
