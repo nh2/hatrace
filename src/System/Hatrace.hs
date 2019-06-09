@@ -1401,45 +1401,45 @@ syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
 formatDetailedSyscallEnter :: DetailedSyscallEnter -> String
 formatDetailedSyscallEnter = \case
 
-  DetailedSyscallEnter_open details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_open details -> enterToString details
 
-  DetailedSyscallEnter_openat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_openat details -> enterToString details
 
-  DetailedSyscallEnter_creat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_creat details -> enterToString details
 
-  DetailedSyscallEnter_pipe details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_pipe details -> enterToString details
 
-  DetailedSyscallEnter_pipe2 details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_pipe2 details -> enterToString details
 
-  DetailedSyscallEnter_access details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_access details -> enterToString details
 
-  DetailedSyscallEnter_faccessat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_faccessat details -> enterToString details
 
-  DetailedSyscallEnter_write details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_write details -> enterToString details
 
-  DetailedSyscallEnter_read details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_read details -> enterToString details
 
-  DetailedSyscallEnter_close details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_close details -> enterToString details
 
-  DetailedSyscallEnter_rename details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_rename details -> enterToString details
 
-  DetailedSyscallEnter_renameat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_renameat details -> enterToString details
 
-  DetailedSyscallEnter_renameat2 details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_renameat2 details -> enterToString details
 
-  DetailedSyscallEnter_stat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_stat details -> enterToString details
 
-  DetailedSyscallEnter_fstat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_fstat details -> enterToString details
 
-  DetailedSyscallEnter_lstat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_lstat details -> enterToString details
 
-  DetailedSyscallEnter_newfstatat details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_newfstatat details -> enterToString details
 
-  DetailedSyscallEnter_execve details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_execve details -> enterToString details
 
-  DetailedSyscallEnter_exit details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_exit details -> enterToString details
 
-  DetailedSyscallEnter_exit_group details -> syscallToString $ formatSyscallEnter details
+  DetailedSyscallEnter_exit_group details -> enterToString details
 
   DetailedSyscallEnter_symlink
     SyscallEnterDetails_symlink{ targetBS, linkpathBS } ->
@@ -1459,6 +1459,9 @@ formatDetailedSyscallEnter = \case
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
+  where
+    enterToString :: SyscallEnterFormatting a => a -> String
+    enterToString = syscallToString defaultStringFormattingOptions . formatSyscallEnter
 
 foreign import ccall unsafe "string.h strerror" c_strerror :: CInt -> IO (Ptr CChar)
 
@@ -1476,45 +1479,45 @@ showPtrOrNull p
 formatDetailedSyscallExit :: DetailedSyscallExit -> String
 formatDetailedSyscallExit = \case
 
-  DetailedSyscallExit_open details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_open details -> exitToString details
 
-  DetailedSyscallExit_openat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_openat details -> exitToString details
 
-  DetailedSyscallExit_creat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_creat details -> exitToString details
 
-  DetailedSyscallExit_pipe details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_pipe details -> exitToString details
 
-  DetailedSyscallExit_pipe2 details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_pipe2 details -> exitToString details
 
-  DetailedSyscallExit_access details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_access details -> exitToString details
 
-  DetailedSyscallExit_faccessat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_faccessat details -> exitToString details
 
-  DetailedSyscallExit_write details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_write details -> exitToString details
 
-  DetailedSyscallExit_read details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_read details -> exitToString details
 
-  DetailedSyscallExit_close details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_close details -> exitToString details
 
-  DetailedSyscallExit_rename details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_rename details -> exitToString details
 
-  DetailedSyscallExit_renameat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_renameat details -> exitToString details
 
-  DetailedSyscallExit_renameat2 details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_renameat2 details -> exitToString details
 
-  DetailedSyscallExit_stat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_stat details -> exitToString details
 
-  DetailedSyscallExit_fstat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_fstat details -> exitToString details
 
-  DetailedSyscallExit_lstat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_lstat details -> exitToString details
 
-  DetailedSyscallExit_newfstatat details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_newfstatat details -> exitToString details
 
-  DetailedSyscallExit_execve details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_execve details -> exitToString details
 
-  DetailedSyscallExit_exit details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_exit details -> exitToString details
 
-  DetailedSyscallExit_exit_group details -> syscallExitToString $ formatSyscallExit details
+  DetailedSyscallExit_exit_group details -> exitToString details
 
   DetailedSyscallExit_symlink
     SyscallExitDetails_symlink{ enterDetail = SyscallEnterDetails_symlink{ targetBS, linkpathBS }} ->
@@ -1538,6 +1541,9 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
 
+  where
+    exitToString :: SyscallExitFormatting a => a -> String
+    exitToString = syscallExitToString defaultStringFormattingOptions . formatSyscallExit
 
 getFormattedSyscallEnterDetails :: Syscall -> SyscallArgs -> CPid -> IO String
 getFormattedSyscallEnterDetails syscall syscallArgs pid =

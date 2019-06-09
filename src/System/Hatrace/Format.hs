@@ -5,16 +5,21 @@ module System.Hatrace.Format
   , FormattedSyscall(..)
   , FormattedArg(..)
   , FormattedReturn(..)
+  , StringFormattingOptions(..)
+  , defaultStringFormattingOptions
   , syscallToString
   , syscallExitToString
   , argPlaceholder
   , formatReturn
   ) where
 
-import Data.ByteString (ByteString)
-import Data.List (intercalate)
-import Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..))
-import System.Posix.Types (CMode(..))
+import           Data.ByteString (ByteString)
+import           Data.List (intercalate)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TE
+import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..))
+import           System.Posix.Types (CMode(..))
 
 class SyscallEnterFormatting a where
   formatSyscallEnter :: a -> FormattedSyscall
@@ -33,7 +38,7 @@ class ArgFormatting a where
   formatArg :: a -> FormattedArg
 
 instance ArgFormatting ByteString where
-  formatArg = VarLengthArg . show
+  formatArg = VarLengthStringArg . T.unpack . TE.decodeUtf8With TE.lenientDecode
 
 instance ArgFormatting CInt where
   formatArg = FixedArg . show
@@ -57,7 +62,7 @@ instance ArgFormatting a => ArgFormatting [a] where
   formatArg = ListArg . map formatArg
 
 data FormattedArg = FixedArg String
-  | VarLengthArg String
+  | VarLengthStringArg String
   | ListArg [FormattedArg]
   | StructArg [(StructFieldName, FormattedArg)]
   deriving (Eq, Show)
@@ -72,29 +77,55 @@ formatReturn = FormattedReturn . formatArg
 
 type StructFieldName = String
 
-syscallToString :: FormattedSyscall -> String
-syscallToString (FormattedSyscall name args) =
-  name  ++ "(" ++ (joinWithCommas $ map argToString args) ++ ")"
+data StringFormattingOptions = StringFormattingOptions
+  { sfoStringLengthLimit :: Int
+  , sfoListLengthLimit :: Int
+  , sfoStructFieldsLimit :: Int
+  } deriving (Eq, Show)
 
-argToString :: FormattedArg -> String
-argToString arg =
+defaultStringFormattingOptions :: StringFormattingOptions
+defaultStringFormattingOptions = StringFormattingOptions
+  { sfoStringLengthLimit = 32
+  , sfoListLengthLimit = 5
+  , sfoStructFieldsLimit = 3
+  }
+
+syscallToString :: StringFormattingOptions -> FormattedSyscall -> String
+syscallToString options (FormattedSyscall name args) =
+  name  ++ "(" ++ (joinWithCommas $ map (argToString options) args) ++ ")"
+
+argToString :: StringFormattingOptions -> FormattedArg -> String
+argToString options arg =
   case arg of
     FixedArg s -> s
-    VarLengthArg s -> s
-    ListArg elements ->
-      "[" ++ (joinWithCommas $ map argToString elements) ++ "]"
-    StructArg fields ->
-      "{" ++ (joinWithCommas $ map structFieldToString fields) ++ "}"
+    VarLengthStringArg s -> limitedString s
+    ListArg elements -> listToString elements
+    StructArg fields -> structToString fields
   where
-    structFieldToString (fieldName, v) = fieldName ++ "=" ++ argToString v
+    sizeLimited :: Int -> ([a] -> String) -> String -> [a] -> String
+    sizeLimited limit f ellipsis xs = case splitAt limit xs of
+      (complete, []) -> f complete
+      (cut, _) -> f cut ++ ellipsis
+    limitedString = sizeLimited (sfoStringLengthLimit options) show "..."
+    listToString xs = "[" ++ (limitedList xs) ++ "]"
+    limitedList =
+      sizeLimited (sfoListLengthLimit options)
+                  (joinWithCommas . map (argToString options))
+                  ", ..."
+    structToString fields = "{" ++ limitedStruct fields ++ "}"
+    limitedStruct =
+      sizeLimited (sfoStructFieldsLimit options)
+                  (joinWithCommas . map structFieldToString)
+                  ", ..."
+    structFieldToString (fieldName, v) = fieldName ++ "=" ++ (argToString options) v
 
-syscallExitToString :: (FormattedSyscall, FormattedReturn) -> String
-syscallExitToString (formattedSyscall, formattedReturn) =
-  syscallToString formattedSyscall ++ returnToString formattedReturn
+syscallExitToString :: StringFormattingOptions -> (FormattedSyscall, FormattedReturn) -> String
+syscallExitToString options (formattedSyscall, formattedReturn) =
+  syscallToString options formattedSyscall ++ returnToString formattedReturn
   where
     returnToString ret = case ret of
       NoReturn -> ""
-      FormattedReturn returnArg -> " = " ++ argToString returnArg
+      FormattedReturn returnArg -> " = " ++ argToString options returnArg
 
 argPlaceholder :: String -> FormattedArg
 argPlaceholder = FixedArg
