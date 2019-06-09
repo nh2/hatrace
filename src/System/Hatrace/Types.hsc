@@ -9,13 +9,13 @@ module System.Hatrace.Types
   , StatStruct(..)
   , TimespecStruct(..)
   , CIntRepresentable(..)
-  , HatraceShow(..)
   ) where
 
 import           Data.Bits
 import           Data.List (intercalate)
 import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..))
 import           Foreign.Storable (Storable(..))
+import           System.Hatrace.Format
 
 -- | Helper type class for int-sized enum-like types
 class CIntRepresentable a where
@@ -27,19 +27,19 @@ data FileAccessMode
   | FileAccessUnknown CInt
   deriving (Eq, Ord, Show)
 
--- | Hatrace-specific show type class
-class HatraceShow a where
-  hShow :: a -> String
-
-instance HatraceShow FileAccessMode where
-  hShow (FileAccessKnown mode) =
-    let granularModes = concat
-          [ if accessModeRead mode then ["R_OK"] else []
-          , if accessModeWrite mode then ["W_OK"] else []
-          , if accessModeExecute mode then ["X_OK"] else []
-          ]
-    in if null granularModes then "F_OK" else intercalate "|" granularModes
-  hShow (FileAccessUnknown x) = show x
+-- TODO think about special handling for bit flags so they could
+-- be better represented in JSON for example
+instance ArgFormatting FileAccessMode where
+  formatArg = FixedArg . formatMode
+    where
+      formatMode (FileAccessKnown mode) =
+        let granularModes = concat
+              [ if accessModeRead mode then ["R_OK"] else []
+              , if accessModeWrite mode then ["W_OK"] else []
+              , if accessModeExecute mode then ["X_OK"] else []
+              ]
+        in if null granularModes then "F_OK" else intercalate "|" granularModes
+      formatMode (FileAccessUnknown x) = show x
 
 data GranularAccessMode = GranularAccessMode
   { accessModeRead :: Bool
@@ -120,10 +120,25 @@ instance Storable StatStruct where
     #{poke struct stat, st_mtim} p st_mtim
     #{poke struct stat, st_ctim} p st_ctim
 
--- | following strace output
-instance HatraceShow StatStruct where
-  hShow StatStruct{..} =
-    "{s_mode=" ++ show st_mode ++ ", st_size=" ++ show st_size ++ ", ..}"
+-- outputtting st_mode and st_size first following strace
+-- which appears to output only those
+instance ArgFormatting StatStruct where
+  formatArg StatStruct {..} =
+    StructArg
+      [ ("st_mode", formatArg st_mode)
+      , ("st_size", formatArg st_size)
+      , ("st_dev", formatArg st_dev)
+      , ("st_ino", formatArg st_ino)
+      , ("st_nlink", formatArg st_nlink)
+      , ("st_uid", formatArg st_uid)
+      , ("st_gid", formatArg st_gid)
+      , ("st_rdev", formatArg st_rdev)
+      , ("st_blksize", formatArg st_blksize)
+      , ("st_blocks", formatArg st_blocks)
+      , ("st_atim", formatArg st_atim)
+      , ("st_mtim", formatArg st_mtim)
+      , ("st_ctim", formatArg st_ctim)
+      ]
 
 data TimespecStruct = TimespecStruct
   { tv_sec :: CLong -- ^ Seconds
@@ -140,3 +155,7 @@ instance Storable TimespecStruct where
   poke p TimespecStruct{..} = do
     #{poke struct timespec, tv_sec} p tv_sec
     #{poke struct timespec, tv_nsec} p tv_nsec
+
+instance ArgFormatting TimespecStruct where
+  formatArg TimespecStruct {..} =
+    StructArg [("tv_sec", formatArg tv_sec), ("tv_nsec", formatArg tv_nsec)]
