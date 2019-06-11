@@ -29,14 +29,14 @@ TODO: describe handling of complex structs as well as dealing with strings.
 
 So in general to add a new syscall `foo` to `hatrace` one needs to do the following:
 
-0. (Optional) add custom types for marshalling complex argument types to the module `System.Hatrace.Types` if those are required..
-1. Add **enter** details:
-    1. Add enter detail record `SyscallEnterDetails_foo` with all C and peeked details.
-    2. Add `DetailedSyscallEnter_foo` constructor to the type `DetailedSyscallEnter` with `SyscallEnterDetails_foo` in it.
-    3. Fill that record details in the `getSyscallEnterDetails` function using case clause for `Syscall_foo`.
-    4. Add enter details formatting in `formatDetailedSyscallEnter` matching the `DetailedSyscallEnter_foo` constructor.
-2. Add **exit** details:
-    1. Add exit detail record `SyscallExitDetails_foo` with all orginal C and also peeked details.
-    2. Add `DetailedSyscallExit_foo` constructor to the type `DetailedSyscallExit` with `SyscallExitDetails_foo` in it.
-    3. In the function `getSyscallExitDetails` add a clause to match `DetailedSyscallEnter_foo` and fill `SyscallExitDetails_foo` with `SyscallEnterDetails_foo` as a part of it.
-    4. Add a clause for `DetailedSyscallExit_foo` in the `formatDetailedSyscallExit` function to format syscall exit details.
+0. (Optional) Add custom types for marshalling complex argument types to the module `System.Hatrace.Types` if those are required.
+1. **Enter** details:
+    1. Create data type `SyscallEnterDetails_foo`.
+    2. Add an entry for it in the type `DetailedSyscallEnter` sum type.
+    3. Update `getSyscallEnterDetails` accordingly.
+    4. Update `formatDetailedSyscallEnter` accordingly.
+2. **Exit** details:
+    1. Create data type `SyscallExitDetails_foo`.
+    2. Add an entry for it the type `DetailedSyscallExit` sum type.
+    3. Update `getSyscallExitDetails` accordingly.
+    4. Update `formatDetailedSyscallExit` accordingly.
