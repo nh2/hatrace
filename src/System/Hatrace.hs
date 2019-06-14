@@ -37,6 +37,8 @@ module System.Hatrace
   , SyscallExitDetails_write(..)
   , SyscallEnterDetails_read(..)
   , SyscallExitDetails_read(..)
+  , SyscallEnterDetails_close(..)
+  , SyscallExitDetails_close(..)
   , SyscallEnterDetails_rename(..)
   , SyscallExitDetails_rename(..)
   , SyscallEnterDetails_renameat(..)
