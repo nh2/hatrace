@@ -20,6 +20,7 @@ module System.Hatrace
   , forkExecvWithPtrace
   , formatHatraceEventConduit
   , printHatraceEvent
+  , printHatraceEventJson
   , SyscallEnterDetails_open(..)
   , SyscallExitDetails_open(..)
   , SyscallEnterDetails_openat(..)
@@ -86,9 +87,12 @@ import           Conduit (foldlC)
 import           Control.Arrow (second)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
+import           Data.Aeson (ToJSON(..), (.=), encode, object)
 import           Data.Bits ((.|.), shiftL, shiftR)
 import           Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
+import qualified Data.ByteString.Lazy as BSL
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
 import           Data.Either (partitionEithers)
@@ -130,7 +134,7 @@ import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.Format
-import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
 
 
@@ -1283,9 +1287,9 @@ strError (ERRNO errno) = c_strerror errno >>= peekCString
 --      It uses PTHREAD_ATTACH, which sends SIGSTOP to the started
 --      process. By that time, the process may already have exited.
 
-traceForkExecvFullPath :: [String] -> IO ExitCode
-traceForkExecvFullPath args = do
-  let formattingSink = formatHatraceEventConduit .| CL.mapM printHatraceEvent .| CL.sinkNull
+traceForkExecvFullPath :: [String] -> ((CPid, HatraceEvent) -> IO ()) -> IO ExitCode
+traceForkExecvFullPath args printer = do
+  let formattingSink = formatHatraceEventConduit .| CL.mapM printer .| CL.sinkNull
 
   (exitCode, ()) <-
     sourceTraceForkExecvFullPathWithSink args formattingSink
@@ -1446,14 +1450,49 @@ atomicWritesSink =
       other -> Left (src, other)
 
 data HatraceEvent
-  = EventSyscallEnter Syscall FormattedSyscall
-  | EventSyscallExit Syscall FormattedSyscall ReturnOrErrno
+  = EventSyscallEnter EventSyscallEnterDetails
+  | EventSyscallExit EventSyscallExitDetails
   | EventPTraceEvent PTRACE_EVENT
   | EventGroupStop Signal
   | EventSignalDelivery Signal
   | EventProcessDeath ExitCode
 
-data ReturnOrErrno = ProperReturn FormattedReturn | ErrnoResult ERRNO String
+data EventSyscallEnterDetails = EventSyscallEnterDetails
+  { evEnterSyscall :: Syscall
+  , evEnterFormatted :: FormattedSyscall
+  } deriving (Eq, Show)
+
+instance ToJSON EventSyscallEnterDetails where
+  toJSON = toJSON . evEnterFormatted
+
+data EventSyscallExitDetails = EventSyscallExitDetails
+  { evExitSyscall ::  Syscall
+  , evExitFormatted :: FormattedSyscall
+  , evExitOutcome :: ReturnOrErrno
+  } deriving (Eq, Show)
+
+instance ToJSON EventSyscallExitDetails where
+  toJSON = toJSON . evExitFormatted
+
+instance ToJSON HatraceEvent where
+  toJSON event =
+    case event of
+      EventSyscallEnter details -> object [ "syscall_enter" .= details ]
+      EventSyscallExit details -> object [ "syscall_exit" .= details ] -- ???
+      EventPTraceEvent ptraceEvent -> object [ "ptrace_event" .= ptraceEvent ]
+      EventGroupStop signal -> object [ "group_stop" .= signalToJSON signal ]
+      EventSignalDelivery signal -> object [ "signal_delivery" .= signalToJSON signal ]
+      EventProcessDeath exitCode -> object [ "process_death" .= exitCodeToJSON exitCode ]
+    where
+      -- TODO: we need use better type than unix's barebone Signal equal to CInt
+      signalToJSON = show
+      -- TODO: use something better
+      exitCodeToJSON = show
+
+data ReturnOrErrno
+  = ProperReturn FormattedReturn
+  | ErrnoResult ERRNO String
+  deriving (Eq, Show)
 
 formatHatraceEventConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, HatraceEvent) m ()
 formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
@@ -1463,11 +1502,11 @@ formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
 
       SyscallEnter (syscall, syscallArgs) -> do
         formatted <- liftIO $ formatSyscallEnter syscall syscallArgs pid
-        return (pid, EventSyscallEnter syscall formatted)
+        return (pid, EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
 
       SyscallExit (syscall, syscallArgs) -> do
-        (formatted, errno) <- liftIO $ formatSyscallExit' syscall syscallArgs pid
-        return (pid, EventSyscallExit syscall formatted errno)
+        (formatted, outcome) <- liftIO $ formatSyscallExit' syscall syscallArgs pid
+        return (pid, EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
 
     PTRACE_EVENT_Stop ptraceEvent ->
       return (pid, EventPTraceEvent ptraceEvent)
@@ -1485,19 +1524,23 @@ printHatraceEvent :: (CPid, HatraceEvent) -> IO ()
 printHatraceEvent (pid, formatted) = do
   putStr $ show [pid] ++ " "
   case formatted of
-    EventSyscallEnter knownSyscall formattedSyscall ->
-      putStrLn $ "Entering syscall: " ++ show knownSyscall ++ ", details: " ++
-        syscallToString defaultStringFormattingOptions formattedSyscall
+    EventSyscallEnter enterDetails ->
+      let syscall = evEnterSyscall enterDetails
+          formattedSyscall = evEnterFormatted enterDetails
+      in putStrLn $ "Entering syscall: " ++ show syscall ++ ", details: " ++
+           syscallToString defaultStringFormattingOptions formattedSyscall
 
-    EventSyscallExit knownSyscall formattedSyscall exit ->
-      let exit' = case exit of
+    EventSyscallExit exitDetails ->
+      let syscall = evExitSyscall exitDetails
+          formattedSyscall = evExitFormatted exitDetails
+          outcome = case evExitOutcome exitDetails of
             ProperReturn formattedReturn -> formattedReturn
             ErrnoResult (ERRNO errno) strErr ->
               let formattedErrno = " (" ++ strErr ++ ")"
               in FormattedReturn $ FixedArg $
                    show errno ++ formattedErrno  -- TODO should we handle it some other way?
-      in putStrLn $ "Exited syscall: " ++ show knownSyscall ++ ", details: " ++
-        syscallExitToString defaultStringFormattingOptions (formattedSyscall, exit')
+      in putStrLn $ "Exited syscall: " ++ show syscall ++ ", details: " ++
+        syscallExitToString defaultStringFormattingOptions (formattedSyscall, outcome)
 
     EventPTraceEvent ptraceEvent ->
       putStrLn $ "Got event: " ++ show ptraceEvent
@@ -1510,6 +1553,14 @@ printHatraceEvent (pid, formatted) = do
 
     EventProcessDeath exitCode ->
       putStrLn $ "Process exited with status: " ++ show exitCode
+
+
+printHatraceEventJson :: (CPid, HatraceEvent) -> IO ()
+printHatraceEventJson (pid, formatted) = do
+  let pid' = fromIntegral pid :: Int
+  BS.putStr $ BSL.toStrict $ encode (pid', formatted)
+  BS.putStr "\n"
+
 
 formatSyscallEnter :: Syscall -> SyscallArgs -> CPid -> IO FormattedSyscall
 formatSyscallEnter syscall syscallArgs pid =
@@ -1654,10 +1705,15 @@ procToArgv name args = do
   pure (path:args)
 
 
-traceForkProcess :: (HasCallStack) => FilePath -> [String] -> IO ExitCode
-traceForkProcess name args = do
+traceForkProcess ::
+     (HasCallStack)
+  => FilePath
+  -> [String]
+  -> ((CPid, HatraceEvent) -> IO ())
+  -> IO ExitCode
+traceForkProcess name args printEvent = do
   argv <- procToArgv name args
-  traceForkExecvFullPath argv
+  traceForkExecvFullPath argv printEvent
 
 
 -- | The terminology in here is oriented on `man 2 ptrace`.
@@ -1678,6 +1734,19 @@ data PTRACE_EVENT
   | PTRACE_EVENT_SECCOMP
   | PTRACE_EVENT_OTHER -- TODO make this carry the number
   deriving (Eq, Ord, Show)
+
+
+instance ToJSON PTRACE_EVENT where
+  toJSON = \case
+    PTRACE_EVENT_VFORK pid -> object [ "PTRACE_EVENT_VFORK" .= show pid ]
+    PTRACE_EVENT_FORK pid -> object [ "PTRACE_EVENT_FORK" .= show pid ]
+    PTRACE_EVENT_CLONE pid -> object [ "PTRACE_EVENT_CLONE" .= show pid ]
+    PTRACE_EVENT_VFORK_DONE pid -> object [ "PTRACE_EVENT_VFORK_DONE" .= show pid ]
+    PTRACE_EVENT_EXEC -> "PTRACE_EVENT_EXEC"
+    PTRACE_EVENT_EXIT -> "PTRACE_EVENT_EXIT"
+    PTRACE_EVENT_STOP -> "PTRACE_EVENT_STOP"
+    PTRACE_EVENT_SECCOMP -> "PTRACE_EVENT_SECCOMP"
+    PTRACE_EVENT_OTHER -> "PTRACE_EVENT_OTHER"
 
 
 -- | The terminology in here is oriented on `man 2 ptrace`.

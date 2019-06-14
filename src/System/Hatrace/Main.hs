@@ -11,7 +11,7 @@ import           Control.Applicative (many)
 import           Control.Monad (forM_, unless)
 import           Data.Either (partitionEithers)
 import qualified Data.Map as Map
-import           Options.Applicative (Parser, argument, str, metavar, flag', long, help, optional)
+import           Options.Applicative (Parser, argument, str, metavar, flag', long, help, optional, switch)
 import qualified Options.Applicative as Opts
 import           System.Exit (exitWith)
 import           System.FilePath (splitPath)
@@ -27,6 +27,7 @@ data CLIArgs = CLIArgs
   { cliProgram :: FilePath
   , cliArgs :: [String]
   , cliFilter :: Maybe Filter
+  , cliJsonOutput :: Bool
   } deriving (Eq, Ord, Show)
 
 
@@ -37,7 +38,10 @@ cliArgsParser = do
   cliFilter <- optional $ flag' FilterAtomicWrites
               ( long "find-nonatomic-writes"
               <> help "find file writes without a following rename to a persistent location" )
-  pure $ CLIArgs{ cliProgram, cliArgs, cliFilter }
+  cliJsonOutput <- switch
+                   ( long "json-output"
+                   <> help "use JSON for output formatting" )
+  pure $ CLIArgs{ cliProgram, cliArgs, cliFilter, cliJsonOutput }
 
 
 -- | Parses the command line arguments for this program.
@@ -54,11 +58,15 @@ main = do
     { cliProgram
     , cliArgs
     , cliFilter
+    , cliJsonOutput
     } <- parseArgs
 
   case cliFilter of
     Nothing -> do
-      exitCode <- traceForkProcess cliProgram cliArgs
+      let printer = if cliJsonOutput
+                    then printHatraceEventJson
+                    else printHatraceEvent
+      exitCode <- traceForkProcess cliProgram cliArgs printer
       exitWith exitCode
     Just FilterAtomicWrites -> do
       argv <- procToArgv cliProgram cliArgs
