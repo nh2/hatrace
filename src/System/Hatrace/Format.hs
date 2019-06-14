@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module System.Hatrace.Format
   ( SyscallEnterFormatting(..)
   , SyscallExitFormatting(..)
@@ -13,6 +14,7 @@ module System.Hatrace.Format
   , formatReturn
   ) where
 
+import           Data.Aeson
 import           Data.ByteString (ByteString)
 import           Data.List (intercalate)
 import qualified Data.Text as T
@@ -31,6 +33,12 @@ data FormattedSyscall =
   FormattedSyscall SyscallName
                    [FormattedArg]
   deriving (Eq, Show)
+
+instance ToJSON FormattedSyscall where
+  toJSON (FormattedSyscall syscallName args) =
+    object [ "name" .= syscallName
+           , "args" .= args
+           ]
 
 type SyscallName = String
 
@@ -66,6 +74,14 @@ data FormattedArg = FixedArg String
   | ListArg [FormattedArg]
   | StructArg [(StructFieldName, FormattedArg)]
   deriving (Eq, Show)
+
+instance ToJSON FormattedArg where
+  toJSON arg = case arg of
+    FixedArg s -> toJSON s
+    VarLengthStringArg s -> toJSON s
+    ListArg xs -> toJSON xs
+    StructArg fieldValues ->
+      object [ T.pack name .= value | (name, value) <- fieldValues ]
 
 data FormattedReturn
   = NoReturn
