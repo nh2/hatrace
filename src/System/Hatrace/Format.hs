@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
 module System.Hatrace.Format
   ( SyscallEnterFormatting(..)
@@ -10,6 +11,7 @@ module System.Hatrace.Format
   , defaultStringFormattingOptions
   , syscallToString
   , syscallExitToString
+  , formatPtrArg
   , argPlaceholder
   , formatReturn
   ) where
@@ -20,19 +22,23 @@ import           Data.List (intercalate)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
-import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..))
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import           Data.Void (Void)
+import           Data.Word (Word64)
+import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
+import           Foreign.Ptr (Ptr, nullPtr, ptrToIntPtr)
 import           System.Posix.Types (CMode(..))
 
 class SyscallEnterFormatting a where
-  formatSyscallEnter :: a -> FormattedSyscall
+  syscallEnterToFormatted :: a -> FormattedSyscall
 
 class SyscallExitFormatting a where
-  formatSyscallExit :: a -> (FormattedSyscall, FormattedReturn)
+  syscallExitToFormatted :: a -> (FormattedSyscall, FormattedReturn)
 
 data FormattedSyscall =
   FormattedSyscall SyscallName
                    [FormattedArg]
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance ToJSON FormattedSyscall where
   toJSON (FormattedSyscall syscallName args) =
@@ -48,36 +54,55 @@ class ArgFormatting a where
 instance ArgFormatting ByteString where
   formatArg = VarLengthStringArg . T.unpack . TE.decodeUtf8With TE.lenientDecode
 
+instance ArgFormatting Word64 where
+  formatArg = IntegerArg . fromIntegral
+
 instance ArgFormatting CInt where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CUInt where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CLong where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CULong where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CSize where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CMode where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
+
+instance ArgFormatting CTime where
+  formatArg = FixedStringArg . show .
+              posixSecondsToUTCTime . realToFrac
+
+instance ArgFormatting (Ptr Void) where
+  formatArg = formatPtrArg "void"
+
+formatPtrArg :: String -> Ptr a -> FormattedArg
+formatPtrArg type_ p
+  | p == nullPtr = FixedStringArg "NULL"
+  | otherwise =
+    FixedStringArg $ "*" ++ type_ ++ "(" ++ show (toInteger $ ptrToIntPtr p) ++ ")"
 
 instance ArgFormatting a => ArgFormatting [a] where
   formatArg = ListArg . map formatArg
 
-data FormattedArg = FixedArg String
+data FormattedArg
+  = IntegerArg Integer -- using Integer to accept both Int64 and Word64 at the same time
+  | FixedStringArg String
   | VarLengthStringArg String
   | ListArg [FormattedArg]
   | StructArg [(StructFieldName, FormattedArg)]
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance ToJSON FormattedArg where
   toJSON arg = case arg of
-    FixedArg s -> toJSON s
+    IntegerArg n -> toJSON n
+    FixedStringArg s -> toJSON s
     VarLengthStringArg s -> toJSON s
     ListArg xs -> toJSON xs
     StructArg fieldValues ->
@@ -86,7 +111,11 @@ instance ToJSON FormattedArg where
 data FormattedReturn
   = NoReturn
   | FormattedReturn FormattedArg
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
+
+instance ToJSON FormattedReturn where
+  toJSON NoReturn = "success"
+  toJSON (FormattedReturn r) = toJSON r
 
 formatReturn :: ArgFormatting a => a -> FormattedReturn
 formatReturn = FormattedReturn . formatArg
@@ -97,7 +126,7 @@ data StringFormattingOptions = StringFormattingOptions
   { sfoStringLengthLimit :: Int
   , sfoListLengthLimit :: Int
   , sfoStructFieldsLimit :: Int
-  } deriving (Eq, Show)
+  } deriving (Eq, Ord, Show)
 
 defaultStringFormattingOptions :: StringFormattingOptions
 defaultStringFormattingOptions = StringFormattingOptions
@@ -113,7 +142,8 @@ syscallToString options (FormattedSyscall name args) =
 argToString :: StringFormattingOptions -> FormattedArg -> String
 argToString options arg =
   case arg of
-    FixedArg s -> s
+    IntegerArg n -> show n
+    FixedStringArg s -> s
     VarLengthStringArg s -> limitedString s
     ListArg elements -> listToString elements
     StructArg fields -> structToString fields
@@ -144,7 +174,7 @@ syscallExitToString options (formattedSyscall, formattedReturn) =
       FormattedReturn returnArg -> " = " ++ argToString options returnArg
 
 argPlaceholder :: String -> FormattedArg
-argPlaceholder = FixedArg
+argPlaceholder = FixedStringArg
 
 joinWithCommas :: [String] -> String
 joinWithCommas = intercalate ", "

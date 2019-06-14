@@ -48,6 +48,7 @@ library
                      , process
                      , template-haskell
                      , text
+                     , time
                      , unix
                      , unliftio
                      , unliftio-core

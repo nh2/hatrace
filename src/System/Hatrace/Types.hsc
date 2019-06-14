@@ -30,7 +30,7 @@ data FileAccessMode
 -- TODO think about special handling for bit flags so they could
 -- be better represented in JSON for example
 instance ArgFormatting FileAccessMode where
-  formatArg = FixedArg . formatMode
+  formatArg = FixedStringArg . formatMode
     where
       formatMode (FileAccessKnown mode) =
         let granularModes = concat
