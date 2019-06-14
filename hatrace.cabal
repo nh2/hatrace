@@ -27,7 +27,9 @@ extra-source-files:
 library
   hs-source-dirs:      src
   c-sources:           cbits/fork-exec-ptrace.c
+                     , cbits/resolve-fd-name.c
   exposed-modules:     System.Hatrace
+                       System.Hatrace.FdNames
                        System.Hatrace.Main
                        System.Hatrace.SignalMap
                        System.Hatrace.SyscallTables
