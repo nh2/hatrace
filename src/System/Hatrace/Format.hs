@@ -20,14 +20,15 @@ import           Data.List (intercalate)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
+import           Data.Word (Word64)
 import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..))
 import           System.Posix.Types (CMode(..))
 
 class SyscallEnterFormatting a where
-  formatSyscallEnter :: a -> FormattedSyscall
+  syscallEnterToFormatted :: a -> FormattedSyscall
 
 class SyscallExitFormatting a where
-  formatSyscallExit :: a -> (FormattedSyscall, FormattedReturn)
+  syscallExitToFormatted :: a -> (FormattedSyscall, FormattedReturn)
 
 data FormattedSyscall =
   FormattedSyscall SyscallName
@@ -47,6 +48,9 @@ class ArgFormatting a where
 
 instance ArgFormatting ByteString where
   formatArg = VarLengthStringArg . T.unpack . TE.decodeUtf8With TE.lenientDecode
+
+instance ArgFormatting Word64 where
+  formatArg = FixedArg . show
 
 instance ArgFormatting CInt where
   formatArg = FixedArg . show
