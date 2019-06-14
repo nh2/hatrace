@@ -65,24 +65,26 @@ spec = before_ assertNoChildren $ do
   -- hspec swallows test failure messages if after the test faulure the
   -- `after_` action fails as well, showing only the latter's message.
 
+  let muted _ = return ()
+
   describe "traceCreateProcess" $ do
 
     it "does not crash for this echo process" $ do
-      traceForkProcess "echo" ["hello"] `shouldReturn` ExitSuccess
+      traceForkProcess "echo" ["hello"] muted  `shouldReturn` ExitSuccess
 
     -- TODO Instead of compiling things here with `make`, do it as a Cabal hook.
 
     it "does not crash for hello.asm with 32-bit API" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-i386-elf64"]
-      traceForkProcess "example-programs-build/hello-linux-i386-elf64" [] `shouldReturn` ExitSuccess
+      traceForkProcess "example-programs-build/hello-linux-i386-elf64" [] muted `shouldReturn` ExitSuccess
 
     it "does not crash for hello.asm real 32-bit" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-i386"]
-      traceForkProcess "example-programs-build/hello-linux-i386" [] `shouldReturn` ExitSuccess
+      traceForkProcess "example-programs-build/hello-linux-i386" [] muted `shouldReturn` ExitSuccess
 
     it "does not crash for hello.asm with 64-bit API" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
-      traceForkProcess "example-programs-build/hello-linux-x86_64" [] `shouldReturn` ExitSuccess
+      traceForkProcess "example-programs-build/hello-linux-x86_64" [] muted `shouldReturn` ExitSuccess
 
     it "does not hang when the traced program segfaults" $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
@@ -100,7 +102,7 @@ spec = before_ assertNoChildren $ do
         -- present.
         --
         -- See also: core(5) - accessible by running `man 5 core`.
-        exitCode <- traceForkProcess "example-programs-build/segfault" []
+        exitCode <- traceForkProcess "example-programs-build/segfault" [] muted
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
 
@@ -587,14 +589,14 @@ spec = before_ assertNoChildren $ do
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let timeDetails =
-              [ (timeResult > 0, (> 0) <$> tlocValue)
+              [ (timeResult > 0)
               | (_pid
                 , Right (DetailedSyscallExit_time
                          SyscallExitDetails_time
-                         { timeResult, tlocValue })
+                         { timeResult })
                 ) <- events
               ]
-        timeDetails `shouldBe` [(True, Nothing), (True, Just True)]
+        timeDetails `shouldBe` [True, True]
 
     describe "brk" $ do
       it "has correct output after changing program break" $ do
