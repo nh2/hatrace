@@ -6,7 +6,8 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
-
+#include <linux/netlink.h>
+#include <linux/if_packet.h>
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -24,7 +25,7 @@ import qualified Data.ByteString as BS
 import           Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import           Data.List (intercalate)
 import           Data.Word (Word32, Word64)
-import           Foreign.C.Types (CInt(..), CUShort(..), CUInt(..), CULong(..), CChar)
+import           Foreign.C.Types (CInt(..), CUShort(..), CUInt(..), CULong(..), CChar, CUChar)
 import           Foreign.C.String (peekCString, newCString)
 import           Foreign.Storable (Storable(..))
 import           Foreign.Ptr
@@ -124,19 +125,21 @@ data Inet6SockAddr = Inet6SockAddr
   deriving (Eq, Ord, Show)
 
 data NetlinkSockAddr = NetlinkSockAddr
-  { nl_pad :: !CUShort
+  { nl_family :: !CUShort
+  , nl_pad :: !CUShort
   , nl_pid :: !CInt
   , nl_groups :: !CUInt
   }
   deriving (Eq, Ord, Show)
 
 data PacketSockAddr = PacketSockAddr
-  { sll_protocol :: !CUShort
+  { sll_family :: !CUShort
+  , sll_protocol :: !CUShort
   , sll_ifindex :: !Int
   , sll_hatype :: !CUShort
-  , sll_pttype :: !Char
-  , sll_halen :: !Char
-  , sll_len :: !BS.ByteString
+  , sll_pkttype :: !CUChar
+  , sll_halen :: !CUChar
+  , sll_addr :: !Word64
   }
   deriving (Eq, Ord, Show)
 
@@ -160,8 +163,8 @@ peekSockAddr ptr addrSize = do
     (#const AF_UNIX) -> SockAddrUnix <$> peekUnixSockAddr ptr addrSize
     (#const AF_INET) -> SockAddrInet <$> peekInetSockAddr ptr
     (#const AF_INET6) -> SockAddrInet6 <$> peekInet6SockAddr ptr
-    (#const AF_NETLINK) -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
-    (#const AF_PACKET) -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
+    (#const AF_NETLINK) -> SockAddrNetlink <$> peekNetlinkSockAddr ptr
+    (#const AF_PACKET) -> SockAddrPacket <$> peekPacketSockAddr ptr
     _ -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
 
 
@@ -196,6 +199,20 @@ peekInetSockAddr ptr = do
   }
 
 
+peekNetlinkSockAddr :: Ptr CChar -> IO NetlinkSockAddr
+peekNetlinkSockAddr ptr = do
+  family <- #{peek struct sockaddr_nl, nl_family} ptr
+  pad   <- #{peek struct sockaddr_nl, nl_pad} ptr
+  pid   <- #{peek struct sockaddr_nl, nl_pid} ptr
+  groups   <- #{peek struct sockaddr_nl, nl_groups} ptr
+  return NetlinkSockAddr {
+    nl_family = family,
+    nl_pad = pad,
+    nl_pid = pid,
+    nl_groups = groups
+  }
+
+
 peekInet6SockAddr :: Ptr CChar -> IO Inet6SockAddr
 peekInet6SockAddr ptr = do
   family <- #{peek struct sockaddr_in6, sin6_family} ptr
@@ -209,6 +226,26 @@ peekInet6SockAddr ptr = do
     sin6_flowinfo = flowinfo,
     sin6_addr = addr,
     sin6_scope_id = scopeId
+  }
+
+
+peekPacketSockAddr :: Ptr CChar -> IO PacketSockAddr
+peekPacketSockAddr ptr = do
+  family <- #{peek struct sockaddr_ll, sll_family} ptr
+  protocol <- #{peek struct sockaddr_ll, sll_protocol} ptr
+  ifindex <- #{peek struct sockaddr_ll, sll_ifindex} ptr
+  hatype <- #{peek struct sockaddr_ll, sll_hatype} ptr
+  pkttype <- #{peek struct sockaddr_ll, sll_pkttype} ptr
+  halen <- #{peek struct sockaddr_ll, sll_halen} ptr
+  addr <- #{peek struct sockaddr_ll, sll_addr} ptr
+  return PacketSockAddr {
+    sll_family = family,
+    sll_protocol = protocol,
+    sll_ifindex = ifindex,
+    sll_hatype = hatype,
+    sll_pkttype = pkttype,
+    sll_halen = halen,
+    sll_addr = addr
   }
 
 
