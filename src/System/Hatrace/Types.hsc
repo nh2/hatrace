@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <netinet/in.h>
+
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -21,12 +23,13 @@ import           Data.Bits
 import qualified Data.ByteString as BS
 import           Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import           Data.List (intercalate)
-import           Data.Word (Word64)
+import           Data.Word (Word32, Word64)
 import           Foreign.C.Types (CInt(..), CUShort(..), CUInt(..), CULong(..), CChar)
-import           Foreign.C.String (CString, peekCString, newCString)
+import           Foreign.C.String (peekCString, newCString)
 import           Foreign.Storable (Storable(..))
 import           Foreign.Ptr
 import           System.Linux.Ptrace (TracedProcess(..), peekBytes)
+import           Data.WideWord.Word128
 
 -- | Helper type class for int-sized enum-like types
 class CIntRepresentable a where
@@ -83,7 +86,7 @@ instance CIntRepresentable FileAccessMode where
       accessBits = (#const R_OK) .|. (#const W_OK) .|. (#const X_OK)
 
 
-data Inet6Addr = Inet6Adrr BS.ByteString -- IPv6 address (16 bytes)
+data Inet6Addr = Inet6Addr { s6_addr :: Word128 } -- IPv6 address (16 bytes)
   deriving (Eq, Ord, Show)
 
 data SockAddr
@@ -101,11 +104,13 @@ data UnixSockAddr = UnixSockAddr
   }
   deriving (Eq, Ord, Show)
 
+data InetAddr = InetAddr { s_addr :: CUInt }
+  deriving (Eq, Ord, Show)
+
 data InetSockAddr = InetSockAddr
   { sin_family :: !CUShort -- ^ should be AF_INET
   , sin_port :: !CUShort
-  , sin_addr :: !CULong
-  , sin_zero :: !BS.ByteString
+  , sin_addr :: !InetAddr
   }
   deriving (Eq, Ord, Show)
 
@@ -153,8 +158,8 @@ peekSockAddr ptr addrSize = do
   (f :: CUShort) <- #{peek struct sockaddr, sa_family} ptr
   case f of
     (#const AF_UNIX) -> SockAddrUnix <$> peekUnixSockAddr ptr addrSize
-    (#const AF_INET) -> SockAddrUnix <$> peekUnixSockAddr ptr addrSize
-    (#const AF_INET6) -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
+    (#const AF_INET) -> SockAddrInet <$> peekInetSockAddr ptr
+    (#const AF_INET6) -> SockAddrInet6 <$> peekInet6SockAddr ptr
     (#const AF_NETLINK) -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
     (#const AF_PACKET) -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
     _ -> SockAddrUnsupportedFamily <$> return UnsupportedFamilySockAddr {sa_family = f}
@@ -163,7 +168,6 @@ peekSockAddr ptr addrSize = do
 peekUnixSockAddr :: Ptr CChar -> Word64 -> IO UnixSockAddr
 peekUnixSockAddr p addrSize = do
   family <- #{peek struct sockaddr_un, sun_family} p
-  print $ "FAMILY: " ++ show family
   case addrSize of
     #{size sa_family_t} -> return UnixSockAddr {
                                           sun_family = family,
@@ -180,20 +184,49 @@ peekUnixSockAddr p addrSize = do
       }
 
 
-instance Storable SockAddr where
-  sizeOf _ = #{size struct sockaddr}
-  alignment _ = #{alignment struct sockaddr}
-  peek p = do
-    f <- #{peek struct sockaddr, sa_family} p
-    let d =
-          case f of
-            (#const AF_UNIX) -> "Unix"
-            (#const AF_INET) -> "Inet"
-            (#const AF_INET6) -> "Inet6"
-            (#const AF_NETLINK) -> "Netlink"
-            (#const AF_PACKET) -> "Packet"
-            _ -> "Unknown"
-    return $ SockAddrUnsupportedFamily UnsupportedFamilySockAddr
-        { sa_family = f
-        }
-  poke p sockAddr = undefined
+peekInetSockAddr :: Ptr CChar  -> IO InetSockAddr
+peekInetSockAddr ptr = do
+  family <- #{peek struct sockaddr_in, sin_family} ptr
+  port   <- #{peek struct sockaddr_in, sin_port} ptr
+  addr   <- #{peek struct sockaddr_in, sin_addr} ptr
+  return InetSockAddr {
+    sin_family = family,
+    sin_port = port,
+    sin_addr = addr
+  }
+
+
+peekInet6SockAddr :: Ptr CChar -> IO Inet6SockAddr
+peekInet6SockAddr ptr = do
+  family <- #{peek struct sockaddr_in6, sin6_family} ptr
+  port   <- #{peek struct sockaddr_in6, sin6_port} ptr
+  flowinfo <- #{peek struct sockaddr_in6, sin6_flowinfo} ptr
+  addr <- #{peek struct sockaddr_in6, sin6_addr} ptr
+  scopeId <- #{peek struct sockaddr_in6, sin6_scope_id} ptr
+  return $ Inet6SockAddr {
+    sin6_family = family,
+    sin6_port = port,
+    sin6_flowinfo = flowinfo,
+    sin6_addr = addr,
+    sin6_scope_id = scopeId
+  }
+
+
+instance Storable Inet6Addr where
+  sizeOf _ = #{size struct in6_addr}
+  alignment _ = #{alignment struct in6_addr}
+  peek ptr = do
+    addr <- #{peek struct in6_addr, s6_addr} ptr
+    return $ Inet6Addr { s6_addr = addr }
+  poke ptr (Inet6Addr addr) = do
+    #{poke struct in6_addr, s6_addr} ptr addr
+
+
+instance Storable InetAddr where
+  sizeOf _ = #{size struct in_addr}
+  alignment _ = #{alignment struct in_addr}
+  peek ptr = do
+    addr <- #{peek struct in_addr, s_addr} ptr
+    return $ InetAddr { s_addr = addr}
+  poke ptr (InetAddr addr) = do
+    #{poke struct in_addr, s_addr} ptr addr
