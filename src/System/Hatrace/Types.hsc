@@ -40,6 +40,7 @@ module System.Hatrace.Types
   , ConcreteAddressFamily(..)
   , SocketType(..)
   , SocketDetails(..)
+  , ShutdownHow(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -732,6 +733,36 @@ instance ArgFormatting SocketType where
           SocketPacket    -> ["SOCK_PACKET"]
       nonBlock = if sdNonBlock then ["SOCK_NONBLOCK"] else []
       cloExec = if sdCloExec then ["SOCK_CLOEXEC"] else []
+
+data ShutdownHow = ShutdownHowKnown DisallowConnections
+  | ShutdownHowUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data DisallowConnections
+  = ReceptionsDisallowed
+  | TransmissionsDisallowed
+  | BothDisallowed
+  deriving (Eq, Ord, Show)
+
+instance CIntRepresentable ShutdownHow where
+  toCInt (ShutdownHowKnown how) =
+    case how of
+      ReceptionsDisallowed -> (#const SHUT_RD)
+      TransmissionsDisallowed -> (#const SHUT_WR)
+      BothDisallowed -> (#const SHUT_RDWR)
+  toCInt (ShutdownHowUnknown unknown) = unknown
+  fromCInt h = case h of
+    (#const SHUT_RD) -> ShutdownHowKnown ReceptionsDisallowed
+    (#const SHUT_WR) -> ShutdownHowKnown TransmissionsDisallowed
+    (#const SHUT_RDWR) -> ShutdownHowKnown BothDisallowed
+    unknown -> ShutdownHowUnknown unknown
+
+instance ArgFormatting ShutdownHow where
+  formatArg (ShutdownHowUnknown unknown) = IntegerArg (fromIntegral unknown)
+  formatArg (ShutdownHowKnown t) = FixedStringArg $ case t of
+    ReceptionsDisallowed -> "SHUT_RD"
+    TransmissionsDisallowed -> "SHUT_WR"
+    BothDisallowed ->  "SHUT_RDWR"
 
 instance ArgFormatting TimespecStruct where
   formatArg TimespecStruct {..} =

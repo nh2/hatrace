@@ -1291,12 +1291,14 @@ instance SyscallExitFormatting SyscallExitDetails_listen where
 data SyscallEnterDetails_shutdown = SyscallEnterDetails_shutdown
   { fd :: CInt
   , how :: CInt
+  -- Peeked details
+  , shutdownHow :: ShutdownHow
   } deriving (Eq, Ord, Show)
 
 
 instance SyscallEnterFormatting SyscallEnterDetails_shutdown where
-  syscallEnterToFormatted SyscallEnterDetails_shutdown{ fd, how } =
-    FormattedSyscall "shutdown" [ formatArg fd, formatArg how ]
+  syscallEnterToFormatted SyscallEnterDetails_shutdown{ fd, shutdownHow } =
+    FormattedSyscall "shutdown" [ formatArg fd, formatArg shutdownHow ]
 
 
 data SyscallExitDetails_shutdown = SyscallExitDetails_shutdown
@@ -1810,6 +1812,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_shutdown $ SyscallEnterDetails_shutdown
       { fd = fromIntegral fd
       , how = fromIntegral how
+      , shutdownHow = fromCInt (fromIntegral how)
       }
   Syscall_send -> do
     let SyscallArgs{ arg0 = fd, arg1 = buffAddr, arg2 = len, arg3 = flags } = syscallArgs
