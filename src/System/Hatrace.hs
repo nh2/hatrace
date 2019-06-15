@@ -1398,7 +1398,7 @@ formatDetailedSyscallEnter = \case
 
   DetailedSyscallEnter_socket
     SyscallEnterDetails_socket{ domain, type_, protocol } ->
-      "socket(" ++ show domain ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ")"
+      "socket(" ++ addressFamilyName domain ++ ", " ++ socketTypeName type_ ++ ", " ++ show protocol ++ ")"
 
   DetailedSyscallEnter_listen
     SyscallEnterDetails_listen{ fd, backlog } ->
@@ -1426,7 +1426,7 @@ formatDetailedSyscallEnter = \case
 
   DetailedSyscallEnter_socketpair -- TODO fds
     SyscallEnterDetails_socketpair{ family, type_, protocol, usockvec } ->
-      "socketpair(" ++ show family ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ", " ++ show usockvec ++ ")"
+      "socketpair(" ++ addressFamilyName family ++ ", " ++ socketTypeName type_ ++ ", " ++ show protocol ++ ", " ++ show usockvec ++ ")"
 
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
@@ -1534,7 +1534,7 @@ formatDetailedSyscallExit = \case
 
   DetailedSyscallExit_socket
     SyscallExitDetails_socket{ enterDetail = SyscallEnterDetails_socket{ domain, type_, protocol }, fd } ->
-      "socket(" ++ show domain ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ") = " ++ show fd
+      "socket(" ++ addressFamilyName domain ++ ", " ++ socketTypeName type_ ++ ", " ++ show protocol ++ ") = " ++ show fd
 
   DetailedSyscallExit_listen
     SyscallExitDetails_listen{ enterDetail = SyscallEnterDetails_listen{ fd, backlog }, retval } ->
@@ -1562,7 +1562,7 @@ formatDetailedSyscallExit = \case
 
   DetailedSyscallExit_socketpair
     SyscallExitDetails_socketpair{ enterDetail = SyscallEnterDetails_socketpair{ family, type_, protocol }, retval, sockfd1, sockfd2 } ->
-      "socketpair(" ++ show family ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ", [" ++ show sockfd1 ++ ", " ++ show sockfd2 ++ "]) = " ++ show retval
+      "socketpair(" ++ addressFamilyName family ++ ", " ++ socketTypeName type_ ++ ", " ++ show protocol ++ ", [" ++ show sockfd1 ++ ", " ++ show sockfd2 ++ "]) = " ++ show retval
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result

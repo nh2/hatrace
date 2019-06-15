@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -10,6 +11,8 @@ module System.Hatrace.Types
   , TimespecStruct(..)
   , CIntRepresentable(..)
   , HatraceShow(..)
+  , addressFamilyName
+  , socketTypeName
   ) where
 
 import           Data.Bits
@@ -140,3 +143,63 @@ instance Storable TimespecStruct where
   poke p TimespecStruct{..} = do
     #{poke struct timespec, tv_sec} p tv_sec
     #{poke struct timespec, tv_nsec} p tv_nsec
+
+addressFamilyName :: CInt -> String
+addressFamilyName af = case af of
+  (#const AF_UNSPEC) -> "AF_UNSPEC"
+  (#const AF_UNIX) -> "AF_UNIX"
+  (#const AF_INET) -> "AF_INET"
+  (#const AF_AX25) -> "AF_AX25"
+  (#const AF_IPX) -> "AF_IPX"
+  (#const AF_APPLETALK) -> "AF_APPLETALK"
+  (#const AF_NETROM) -> "AF_NETROM"
+  (#const AF_BRIDGE) -> "AF_BRIDGE"
+  (#const AF_ATMPVC) -> "AF_ATMPVC"
+  (#const AF_X25) -> "AF_X25"
+  (#const AF_INET6) -> "AF_INET6"
+  (#const AF_ROSE) -> "AF_ROSE"
+  (#const AF_DECnet) -> "AF_ROSE"
+  (#const AF_NETBEUI) -> "AF_NETBEUI"
+  (#const AF_SECURITY) -> "AF_SECURITY"
+  (#const AF_KEY) -> "AF_KEY"
+  (#const AF_NETLINK) -> "AF_NETLINK"
+  (#const AF_PACKET) -> "AF_PACKET"
+  (#const AF_ASH) -> "AF_ASH"
+  (#const AF_ECONET) -> "AF_ECONET"
+  (#const AF_ATMSVC) -> "AF_ATMSVC"
+  (#const AF_RDS) -> "AF_RDS"
+  (#const AF_SNA) -> "AF_SNA"
+  (#const AF_IRDA) -> "AF_IRDA"
+  (#const AF_PPPOX) -> "AF_PPPOX"
+  (#const AF_WANPIPE) -> "AF_WANPIPE"
+  (#const AF_LLC) -> "AF_LLC"
+  (#const AF_IB) -> "AF_IB"
+  (#const AF_MPLS) -> "AF_MPLS"
+  (#const AF_CAN) -> "AF_CAN"
+  (#const AF_TIPC) -> "AF_TIPC"
+  (#const AF_BLUETOOTH) -> "AF_BLUETOOTH"
+  (#const AF_IUCV) -> "AF_IUCV"
+  (#const AF_RXRPC) -> "AF_RXRPC"
+  (#const AF_ISDN) -> "AF_ISDN"
+  (#const AF_PHONET) -> "AF_PHONET"
+  (#const AF_IEEE802154) -> "AF_IEEE802154"
+  (#const AF_CAIF) -> "AF_CAIF"
+  (#const AF_ALG) -> "AF_ALG"
+  (#const AF_NFC) -> "AF_NFC"
+  (#const AF_VSOCK) -> "AF_VSOCK"
+  (#const AF_KCM) -> "AF_KCM"
+  (#const AF_QIPCRTR) -> "AF_QIPCRTR"
+  (#const AF_SMC) -> "AF_SMC"
+  (#const AF_XDP) -> "AF_XDP"
+  _ -> "AF_" ++ show af
+
+socketTypeName :: CInt -> String
+socketTypeName sock = case sock of
+  (#const SOCK_STREAM) -> "SOCK_STREAM"
+  (#const SOCK_DGRAM) -> "SOCK_DGRAM"
+  (#const SOCK_RAW) -> "SOCK_RAW"
+  (#const SOCK_RDM) -> "SOCK_RDM"
+  (#const SOCK_SEQPACKET) -> "SOCK_SEQPACKET"
+  (#const SOCK_DCCP) -> "SOCK_DCCP"
+  (#const SOCK_PACKET) -> "SOCK_PACKET"
+  _ -> "SOCK_" ++ show sock
