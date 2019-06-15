@@ -613,3 +613,21 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         pathsLstatRequested `shouldSatisfy` ("/dev/null" `elem`)
+
+    describe "time" $ do
+      it "seen called by trigger-time executable" $ do
+        callProcess "make" ["--quiet", "example-programs-build/trigger-time"]
+        argv <- procToArgv "example-programs-build/trigger-time" ["--quiet"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let timeDetails =
+              [ (timeResult > 0, (> 0) <$> tlocValue)
+              | (_pid
+                , Right (DetailedSyscallExit_time
+                         SyscallExitDetails_time
+                         { timeResult, tlocValue })
+                ) <- events
+              ]
+        timeDetails `shouldBe` [(True, Nothing), (True, Just True)]
