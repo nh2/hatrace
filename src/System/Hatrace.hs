@@ -59,6 +59,8 @@ module System.Hatrace
   , SyscallExitDetails_exit(..)
   , SyscallEnterDetails_exit_group(..)
   , SyscallExitDetails_exit_group(..)
+  , SyscallEnterDetails_socket(..)
+  , SyscallExitDetails_socket(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -630,6 +632,18 @@ data SyscallExitDetails_execve = SyscallExitDetails_execve
   } deriving (Eq, Ord, Show)
 
 
+data SyscallEnterDetails_socket = SyscallEnterDetails_socket
+  { domain :: CInt
+  , type_ :: CInt
+  , protocol :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_socket = SyscallExitDetails_socket
+  { enterDetail :: SyscallEnterDetails_socket
+  , fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -651,6 +665,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_newfstatat SyscallEnterDetails_newfstatat
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
+  | DetailedSyscallEnter_socket SyscallEnterDetails_socket
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -676,6 +691,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_newfstatat SyscallExitDetails_newfstatat
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
+  | DetailedSyscallExit_socket SyscallExitDetails_socket
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -893,6 +909,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
   Syscall_exit_group -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit_group $ SyscallEnterDetails_exit_group { status = fromIntegral status }
+  Syscall_socket -> do
+    let SyscallArgs{ arg0 = domain, arg1 = type_, arg2 = protocol } = syscallArgs
+    pure $ DetailedSyscallEnter_socket $ SyscallEnterDetails_socket
+      { domain = fromIntegral domain
+      , type_ = fromIntegral type_
+      , protocol = fromIntegral protocol
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1028,6 +1051,11 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
               enterDetail@SyscallEnterDetails_exit_group{} -> do
                 pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
 
+            DetailedSyscallEnter_socket
+              enterDetail@SyscallEnterDetails_socket{} -> do
+                pure $ DetailedSyscallExit_socket $
+                  SyscallExitDetails_socket{ enterDetail, fd = fromIntegral result }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1141,6 +1169,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_exit_group{ status } ->
       "exit_group(" ++ show status ++ ")"
 
+  DetailedSyscallEnter_socket
+    SyscallEnterDetails_socket{ domain, type_, protocol } ->
+      "socket(" ++ show domain ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1244,6 +1276,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_exit_group
     SyscallExitDetails_exit_group{ enterDetail = SyscallEnterDetails_exit_group{ status }} ->
       "exit_group(" ++ show status ++ ")"
+
+  DetailedSyscallExit_socket
+    SyscallExitDetails_socket{ enterDetail = SyscallEnterDetails_socket{ domain, type_, protocol }, fd } ->
+      "socket(" ++ show domain ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ") = " ++ show fd
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
