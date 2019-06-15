@@ -65,6 +65,14 @@ module System.Hatrace
   , SyscallExitDetails_listen(..)
   , SyscallEnterDetails_shutdown(..)
   , SyscallExitDetails_shutdown(..)
+  , SyscallEnterDetails_send(..)
+  , SyscallExitDetails_send(..)
+  , SyscallEnterDetails_sendto(..)
+  , SyscallExitDetails_sendto(..)
+  , SyscallEnterDetails_recv(..)
+  , SyscallExitDetails_recv(..)
+  , SyscallEnterDetails_recvfrom(..)
+  , SyscallExitDetails_recvfrom(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -108,7 +116,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
-import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
+import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
 import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
@@ -667,6 +675,66 @@ data SyscallExitDetails_shutdown = SyscallExitDetails_shutdown
   , retval :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_send = SyscallEnterDetails_send
+  { fd :: CInt
+  , buff :: Ptr Void
+  , len :: CSize
+  , flags :: CUInt
+  -- Peeked details
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_send = SyscallExitDetails_send
+  { enterDetail :: SyscallEnterDetails_send
+  , retval :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_sendto = SyscallEnterDetails_sendto
+  { fd :: CInt
+  , buff :: Ptr Void
+  , len :: CSize
+  , flags :: CUInt
+  , addr :: Ptr Void -- TODO StructSockAddr
+  , addr_len :: CInt
+  -- Peeked details
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_sendto = SyscallExitDetails_sendto
+  { enterDetail :: SyscallEnterDetails_sendto
+  , retval :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_recv = SyscallEnterDetails_recv
+  { fd :: CInt
+  , ubuf :: Ptr Void
+  , size :: CSize
+  , flags :: CUInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_recv = SyscallExitDetails_recv
+  { enterDetail :: SyscallEnterDetails_recv
+  , retval :: CInt
+  -- Peeked details
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_recvfrom = SyscallEnterDetails_recvfrom
+  { fd :: CInt
+  , ubuf :: Ptr Void
+  , size :: CSize
+  , flags :: CUInt
+  , addr :: Ptr Void -- TODO StructSockAddr
+  , addr_len :: Ptr CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_recvfrom = SyscallExitDetails_recvfrom
+  { enterDetail :: SyscallEnterDetails_recvfrom
+  , retval :: CInt
+  -- Peeked details
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -692,6 +760,10 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_socket SyscallEnterDetails_socket
   | DetailedSyscallEnter_listen SyscallEnterDetails_listen
   | DetailedSyscallEnter_shutdown SyscallEnterDetails_shutdown
+  | DetailedSyscallEnter_send SyscallEnterDetails_send
+  | DetailedSyscallEnter_sendto SyscallEnterDetails_sendto
+  | DetailedSyscallEnter_recv SyscallEnterDetails_recv
+  | DetailedSyscallEnter_recvfrom SyscallEnterDetails_recvfrom
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -720,6 +792,10 @@ data DetailedSyscallExit
   | DetailedSyscallExit_socket SyscallExitDetails_socket
   | DetailedSyscallExit_listen SyscallExitDetails_listen
   | DetailedSyscallExit_shutdown SyscallExitDetails_shutdown
+  | DetailedSyscallExit_send SyscallExitDetails_send
+  | DetailedSyscallExit_sendto SyscallExitDetails_sendto
+  | DetailedSyscallExit_recv SyscallExitDetails_recv
+  | DetailedSyscallExit_recvfrom SyscallExitDetails_recvfrom
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -956,8 +1032,54 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { fd = fromIntegral fd
       , how = fromIntegral how
       }
+  Syscall_send -> do
+    let SyscallArgs{ arg0 = fd, arg1 = buffAddr, arg2 = len, arg3 = flags } = syscallArgs
+    let buffPtr = word64ToPtr buffAddr
+    bufContents <- peekBytes proc buffPtr (fromIntegral len)
+    pure $ DetailedSyscallEnter_send $ SyscallEnterDetails_send
+      { fd = fromIntegral fd
+      , buff = buffPtr
+      , len = fromIntegral len
+      , flags = fromIntegral flags
+      , bufContents
+      }
+  Syscall_sendto -> do
+    let SyscallArgs{ arg0 = fd, arg1 = buffAddr, arg2 = len, arg3 = flags, arg4 = addrAddr, arg5 = addr_len } = syscallArgs
+    let buffPtr = word64ToPtr buffAddr
+    let addrPtr = word64ToPtr addrAddr
+    bufContents <- peekBytes proc buffPtr (fromIntegral len)
+    pure $ DetailedSyscallEnter_sendto $ SyscallEnterDetails_sendto
+      { fd = fromIntegral fd
+      , buff = buffPtr
+      , len = fromIntegral len
+      , flags = fromIntegral flags
+      , addr = addrPtr
+      , addr_len = fromIntegral addr_len
+      , bufContents
+      }
+  Syscall_recv -> do
+    let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags } = syscallArgs
+    let ubufPtr = word64ToPtr ubufAddr
+    pure $ DetailedSyscallEnter_recv $ SyscallEnterDetails_recv
+      { fd = fromIntegral fd
+      , ubuf = ubufPtr
+      , size = fromIntegral size
+      , flags = fromIntegral flags
+      }
+  Syscall_recvfrom -> do
+    let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags, arg4 = addrAddr, arg5 = addr_lenAddr } = syscallArgs
+    let ubufPtr = word64ToPtr ubufAddr
+    let addrPtr = word64ToPtr addrAddr
+    let addr_lenPtr = word64ToPtr addr_lenAddr
+    pure $ DetailedSyscallEnter_recvfrom $ SyscallEnterDetails_recvfrom
+      { fd = fromIntegral fd
+      , ubuf = ubufPtr
+      , size = fromIntegral size
+      , flags = fromIntegral flags
+      , addr = addrPtr
+      , addr_len = addr_lenPtr
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
-
 
 getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
 getSyscallExitDetails knownSyscall syscallArgs pid = do
@@ -1106,6 +1228,28 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_shutdown $
                   SyscallExitDetails_shutdown{ enterDetail, retval = fromIntegral result }
 
+            DetailedSyscallEnter_send
+              enterDetail@SyscallEnterDetails_send{} -> do
+                pure $ DetailedSyscallExit_send $
+                  SyscallExitDetails_send{ enterDetail, retval = fromIntegral result }
+
+            DetailedSyscallEnter_sendto
+              enterDetail@SyscallEnterDetails_sendto{} -> do
+                pure $ DetailedSyscallExit_sendto $
+                  SyscallExitDetails_sendto{ enterDetail, retval = fromIntegral result }
+
+            DetailedSyscallEnter_recv
+              enterDetail@SyscallEnterDetails_recv{ ubuf } -> do
+                bufContents <- peekBytes (TracedProcess pid) ubuf (fromIntegral result)
+                pure $ DetailedSyscallExit_recv $
+                  SyscallExitDetails_recv{ enterDetail, retval = fromIntegral result, bufContents }
+
+            DetailedSyscallEnter_recvfrom
+              enterDetail@SyscallEnterDetails_recvfrom{ ubuf } -> do
+                bufContents <- peekBytes (TracedProcess pid) ubuf (fromIntegral result)
+                pure $ DetailedSyscallExit_recvfrom $
+                  SyscallExitDetails_recvfrom{ enterDetail, retval = fromIntegral result, bufContents }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1231,6 +1375,22 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_shutdown{ fd, how } ->
       "shutdown(" ++ show fd ++ ", " ++ show how ++ ")"
 
+  DetailedSyscallEnter_send
+    SyscallEnterDetails_send{ fd, bufContents, len, flags } ->
+      "send(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ")"
+
+  DetailedSyscallEnter_sendto -- TODO sockaddr
+    SyscallEnterDetails_sendto{ fd, bufContents, len, flags, addr, addr_len } ->
+      "sendto(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ")"
+
+  DetailedSyscallEnter_recv
+    SyscallEnterDetails_recv{ fd, ubuf, size, flags } ->
+      "recv(" ++ show fd ++ ", " ++ show ubuf ++ ", " ++ show size ++ ", " ++ show flags ++ ")"
+
+  DetailedSyscallEnter_recvfrom -- TODO sockaddr
+    SyscallEnterDetails_recvfrom{ fd, ubuf, size, flags, addr, addr_len } ->
+      "recvfrom(" ++ show fd ++ ", " ++ show ubuf ++ ", " ++ show size ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1346,6 +1506,22 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_shutdown
     SyscallExitDetails_shutdown{ enterDetail = SyscallEnterDetails_shutdown{ fd, how }, retval } ->
       "shutdown(" ++ show fd ++ ", " ++ show how ++ ") = " ++ show retval
+
+  DetailedSyscallExit_send
+    SyscallExitDetails_send{ enterDetail = SyscallEnterDetails_send{ fd, bufContents, len, flags }, retval } ->
+      "send(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ") = " ++ show retval
+
+  DetailedSyscallExit_sendto -- TODO sockaddr
+    SyscallExitDetails_sendto{ enterDetail = SyscallEnterDetails_sendto{ fd, bufContents, len, flags, addr, addr_len }, retval } ->
+      "sendto(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ") = " ++ show retval
+
+  DetailedSyscallExit_recv -- TODO buf
+    SyscallExitDetails_recv{ enterDetail = SyscallEnterDetails_recv{ fd, size, flags }, retval, bufContents } ->
+      "recv(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show size ++ ", " ++ show flags ++ ") = " ++ show retval
+
+  DetailedSyscallExit_recvfrom -- TODO sockaddr + buf
+    SyscallExitDetails_recvfrom{ enterDetail = SyscallEnterDetails_recvfrom{ fd, size, flags, addr, addr_len }, retval, bufContents } ->
+      "recvfrom(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show size ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ") = " ++ show retval
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
