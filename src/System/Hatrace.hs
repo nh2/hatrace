@@ -63,6 +63,8 @@ module System.Hatrace
   , SyscallExitDetails_socket(..)
   , SyscallEnterDetails_listen(..)
   , SyscallExitDetails_listen(..)
+  , SyscallEnterDetails_shutdown(..)
+  , SyscallExitDetails_shutdown(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -655,6 +657,16 @@ data SyscallExitDetails_listen = SyscallExitDetails_listen
   , retval :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_shutdown = SyscallEnterDetails_shutdown
+  { fd :: CInt
+  , how :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_shutdown = SyscallExitDetails_shutdown
+  { enterDetail :: SyscallEnterDetails_shutdown
+  , retval :: CInt
+  } deriving (Eq, Ord, Show)
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -679,6 +691,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_socket SyscallEnterDetails_socket
   | DetailedSyscallEnter_listen SyscallEnterDetails_listen
+  | DetailedSyscallEnter_shutdown SyscallEnterDetails_shutdown
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -706,6 +719,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_socket SyscallExitDetails_socket
   | DetailedSyscallExit_listen SyscallExitDetails_listen
+  | DetailedSyscallExit_shutdown SyscallExitDetails_shutdown
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -936,6 +950,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { fd = fromIntegral fd
       , backlog = fromIntegral backlog
       }
+  Syscall_shutdown -> do
+    let SyscallArgs{ arg0 = fd, arg1 = how } = syscallArgs
+    pure $ DetailedSyscallEnter_shutdown $ SyscallEnterDetails_shutdown
+      { fd = fromIntegral fd
+      , how = fromIntegral how
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1081,6 +1101,11 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_listen $
                   SyscallExitDetails_listen{ enterDetail, retval = fromIntegral result }
 
+            DetailedSyscallEnter_shutdown
+              enterDetail@SyscallEnterDetails_shutdown{} -> do
+                pure $ DetailedSyscallExit_shutdown $
+                  SyscallExitDetails_shutdown{ enterDetail, retval = fromIntegral result }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1202,6 +1227,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_listen{ fd, backlog } ->
       "listen(" ++ show fd ++ ", " ++ show backlog ++ ")"
 
+  DetailedSyscallEnter_shutdown
+    SyscallEnterDetails_shutdown{ fd, how } ->
+      "shutdown(" ++ show fd ++ ", " ++ show how ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1313,6 +1342,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_listen
     SyscallExitDetails_listen{ enterDetail = SyscallEnterDetails_listen{ fd, backlog }, retval } ->
       "listen(" ++ show fd ++ ", " ++ show backlog ++ ") = " ++ show retval
+
+  DetailedSyscallExit_shutdown
+    SyscallExitDetails_shutdown{ enterDetail = SyscallEnterDetails_shutdown{ fd, how }, retval } ->
+      "shutdown(" ++ show fd ++ ", " ++ show how ++ ") = " ++ show retval
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
