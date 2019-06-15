@@ -134,7 +134,7 @@ import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.Format
-import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
 
 
@@ -1541,10 +1541,8 @@ printHatraceEvent formattingOptions (HatraceEvent pid details) = do
           formattedSyscall = evExitFormatted exitDetails
           outcome = case evExitOutcome exitDetails of
             ProperReturn formattedReturn -> formattedReturn
-            ErrnoResult (ERRNO errno) strErr ->
-              let formattedErrno = " (" ++ strErr ++ ")"
-              in FormattedReturn $ FixedArg $
-                   show errno ++ formattedErrno  -- TODO should we handle it some other way?
+            ErrnoResult _errno strErr ->
+              FormattedReturn $ FixedArg $ "-1 (" ++ strErr ++ ")"
       in putStrLn $ "Exited syscall: " ++ show syscall ++ ", details: " ++
         syscallExitToString formattingOptions (formattedSyscall, outcome)
 
@@ -1627,11 +1625,12 @@ formatSyscallExit' :: Syscall -> SyscallArgs -> CPid -> IO (FormattedSyscall, Re
 formatSyscallExit' syscall syscallArgs pid = do
   (result, mbErrno) <- getExitedSyscallResult pid
 
-  let unknownExit fakeName = do
+  let unknownExit name = definedArgsExit name (unimplementedArgs syscallArgs)
+      definedArgsExit name args = do
         err <- case mbErrno of
           Nothing -> pure $ ProperReturn NoReturn
           Just errno -> ErrnoResult errno <$> strError errno
-        pure (FormattedSyscall fakeName (unimplementedArgs syscallArgs), err)
+        pure (FormattedSyscall name args, err)
 
   case syscall of
     UnknownSyscall number ->
@@ -1639,10 +1638,15 @@ formatSyscallExit' syscall syscallArgs pid = do
        -- For some syscalls we must not try to get the enter details at their exit,
        -- because the registers involved are invalidated.
        -- TODO: Address this by not re-fetching the enter details at all, but by
-    KnownSyscall knownSyscall -> do
-      details <- getSyscallExitDetails' knownSyscall syscallArgs result pid
-      formatDetailedSyscallExit' details $ \_syscall _syscallArgs _result ->
-        unknownExit $ "unimplemented_syscall(" ++ show syscall ++ ")"
+    KnownSyscall knownSyscall ->
+      case mbErrno of
+        Just _erno ->
+          definedArgsExit (syscallName knownSyscall)
+                          [ argPlaceholder "TODO implement remembering arguments" ]
+        Nothing -> do
+          details <- getSyscallExitDetails' knownSyscall syscallArgs result pid
+          formatDetailedSyscallExit' details $ \_syscall _syscallArgs _result ->
+            unknownExit $ "unimplemented_syscall(" ++ show syscall ++ ")"
 
 formatDetailedSyscallExit' ::
      DetailedSyscallExit
