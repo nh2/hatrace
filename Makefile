@@ -16,46 +16,30 @@ example-programs: $(EXAMPLE_PROGRAMS)
 # syscalls related to dynamic loading, thus avoiding a syscall flood
 # unrelated to the key thing each program does.
 
-example-programs-build/hello-linux-i386: example-programs/hello-linux-i386.asm
+example-programs-build/%-i386: example-programs/%-i386.asm
 	mkdir -p example-programs-build
-	nasm -Wall -Werror -f elf example-programs/hello-linux-i386.asm -o example-programs-build/hello-linux-i386.o
-	ld -m elf_i386 -e _start example-programs-build/hello-linux-i386.o -o example-programs-build/hello-linux-i386
-	rm example-programs-build/hello-linux-i386.o
+	nasm -Wall -Werror -f elf $< -o $@.o
+	ld -m elf_i386 -e _start $@.o -o $@
+	rm $@.o
 
-example-programs-build/hello-linux-i386-elf64: example-programs/hello-linux-i386.asm
+example-programs-build/%-i386-elf64: example-programs/%-i386.asm
 	mkdir -p example-programs-build
-	nasm -Wall -Werror -f elf64 example-programs/hello-linux-i386.asm -o example-programs-build/hello-linux-i386-elf64.o
-	ld -e _start example-programs-build/hello-linux-i386-elf64.o -o example-programs-build/hello-linux-i386-elf64
-	rm example-programs-build/hello-linux-i386-elf64.o
+	nasm -Wall -Werror -f elf64 $< -o $@.o
+	ld -e _start $@.o -o $@
+	rm $@.o
 
-example-programs-build/hello-linux-x86_64: example-programs/hello-linux-x86_64.asm
+example-programs-build/%-x86_64: example-programs/%-x86_64.asm
 	mkdir -p example-programs-build
-	nasm -Wall -Werror -f elf64 example-programs/hello-linux-x86_64.asm -o example-programs-build/hello-linux-x86_64.o
-	ld -e _start example-programs-build/hello-linux-x86_64.o -o example-programs-build/hello-linux-x86_64
-	rm example-programs-build/hello-linux-x86_64.o
+	nasm -Wall -Werror -f elf64 $< -o $@.o
+	ld -e _start $@.o -o $@
+	rm $@.o
 
-example-programs-build/segfault: example-programs/segfault.asm
+example-programs-build/%: example-programs/%.asm
 	mkdir -p example-programs-build
-	nasm -Wall -Werror -f elf64 example-programs/segfault.asm -o example-programs-build/segfault.o
-	ld -e _start example-programs-build/segfault.o -o example-programs-build/segfault
-	rm example-programs-build/segfault.o
+	nasm -Wall -Werror -f elf64 $< -o $@.o
+	ld -e _start $@.o -o $@
+	rm $@.o
 
-example-programs-build/execve: example-programs/execve.c
+example-programs-build/%: example-programs/%.c
 	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/execve.c -o example-programs-build/execve
-
-example-programs-build/execve-linux-null-envp: example-programs/execve-linux-null-envp.c
-	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/execve-linux-null-envp.c -o example-programs-build/execve-linux-null-envp
-
-example-programs-build/atomic-write: example-programs/atomic-write.c
-	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/atomic-write.c -o example-programs-build/atomic-write
-
-example-programs-build/write-EBADF: example-programs/write-EBADF.c
-	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/write-EBADF.c -o example-programs-build/write-EBADF
-
-example-programs-build/access-itself: example-programs/access-itself.c
-	mkdir -p example-programs-build
-	gcc -static -std=c99 -Wall -Werror example-programs/access-itself.c -o example-programs-build/access-itself
+	gcc -static -std=c99 -Wall -Werror $< -o $@
