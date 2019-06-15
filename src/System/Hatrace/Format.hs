@@ -50,30 +50,32 @@ instance ArgFormatting ByteString where
   formatArg = VarLengthStringArg . T.unpack . TE.decodeUtf8With TE.lenientDecode
 
 instance ArgFormatting Word64 where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CInt where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CUInt where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CLong where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CULong where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CSize where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CMode where
-  formatArg = FixedArg . show
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting a => ArgFormatting [a] where
   formatArg = ListArg . map formatArg
 
-data FormattedArg = FixedArg String
+data FormattedArg
+  = IntegerArg Integer -- using Integer to accept both Int64 and Word64 at the same time
+  | FixedStringArg String
   | VarLengthStringArg String
   | ListArg [FormattedArg]
   | StructArg [(StructFieldName, FormattedArg)]
@@ -81,7 +83,8 @@ data FormattedArg = FixedArg String
 
 instance ToJSON FormattedArg where
   toJSON arg = case arg of
-    FixedArg s -> toJSON s
+    IntegerArg n -> toJSON n
+    FixedStringArg s -> toJSON s
     VarLengthStringArg s -> toJSON s
     ListArg xs -> toJSON xs
     StructArg fieldValues ->
@@ -91,6 +94,10 @@ data FormattedReturn
   = NoReturn
   | FormattedReturn FormattedArg
   deriving (Eq, Show)
+
+instance ToJSON FormattedReturn where
+  toJSON NoReturn = "success"
+  toJSON (FormattedReturn r) = toJSON r
 
 formatReturn :: ArgFormatting a => a -> FormattedReturn
 formatReturn = FormattedReturn . formatArg
@@ -117,7 +124,8 @@ syscallToString options (FormattedSyscall name args) =
 argToString :: StringFormattingOptions -> FormattedArg -> String
 argToString options arg =
   case arg of
-    FixedArg s -> s
+    IntegerArg n -> show n
+    FixedStringArg s -> s
     VarLengthStringArg s -> limitedString s
     ListArg elements -> listToString elements
     StructArg fields -> structToString fields
@@ -148,7 +156,7 @@ syscallExitToString options (formattedSyscall, formattedReturn) =
       FormattedReturn returnArg -> " = " ++ argToString options returnArg
 
 argPlaceholder :: String -> FormattedArg
-argPlaceholder = FixedArg
+argPlaceholder = FixedStringArg
 
 joinWithCommas :: [String] -> String
 joinWithCommas = intercalate ", "

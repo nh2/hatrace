@@ -1476,7 +1476,9 @@ data EventSyscallExitDetails = EventSyscallExitDetails
   } deriving (Eq, Show)
 
 instance ToJSON EventSyscallExitDetails where
-  toJSON = toJSON . evExitFormatted
+  toJSON details = object [ "syscall" .= evExitFormatted details
+                          , "outcome" .= evExitOutcome details
+                          ]
 
 instance ToJSON HatraceEvent where
   toJSON (HatraceEvent pid details) =
@@ -1489,7 +1491,7 @@ instance ToJSON HatraceEvent where
       EventProcessDeath exitCode -> formatDetails "process_death" (exitCodeToJSON exitCode)
     where
       formatDetails eventType eventDetails =
-        object [ "pid" .= show pid, eventType .= eventDetails ]
+        object [ "pid" .= toInteger pid, eventType .= eventDetails ]
       -- TODO: we need use better type than unix's barebone Signal equal to CInt
       signalToJSON = show
       -- TODO: use something better
@@ -1499,6 +1501,14 @@ data ReturnOrErrno
   = ProperReturn FormattedReturn
   | ErrnoResult ERRNO String
   deriving (Eq, Show)
+
+instance ToJSON ReturnOrErrno where
+  toJSON (ProperReturn r) = object [ "return" .= r ]
+  toJSON (ErrnoResult (ERRNO errno) descr) =
+    object [ "error" .= object [ "errno" .= toInteger errno
+                               , "description" .= descr
+                               ]
+           ]
 
 formatHatraceEventConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) HatraceEvent m ()
 formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
@@ -1542,7 +1552,7 @@ printHatraceEvent formattingOptions (HatraceEvent pid details) = do
           outcome = case evExitOutcome exitDetails of
             ProperReturn formattedReturn -> formattedReturn
             ErrnoResult _errno strErr ->
-              FormattedReturn $ FixedArg $ "-1 (" ++ strErr ++ ")"
+              FormattedReturn $ FixedStringArg $ "-1 (" ++ strErr ++ ")"
       in putStrLn $ "Exited syscall: " ++ show syscall ++ ", details: " ++
         syscallExitToString formattingOptions (formattedSyscall, outcome)
 
