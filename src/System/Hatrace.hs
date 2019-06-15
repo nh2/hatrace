@@ -1287,7 +1287,7 @@ strError (ERRNO errno) = c_strerror errno >>= peekCString
 --      It uses PTHREAD_ATTACH, which sends SIGSTOP to the started
 --      process. By that time, the process may already have exited.
 
-traceForkExecvFullPath :: [String] -> ((CPid, HatraceEvent) -> IO ()) -> IO ExitCode
+traceForkExecvFullPath :: [String] -> (HatraceEvent -> IO ()) -> IO ExitCode
 traceForkExecvFullPath args printer = do
   let formattingSink = formatHatraceEventConduit .| CL.mapM printer .| CL.sinkNull
 
@@ -1449,13 +1449,17 @@ atomicWritesSink =
       AtomicWrite target -> Right (target, src)
       other -> Left (src, other)
 
-data HatraceEvent
+data HatraceEvent = HatraceEvent CPid EventDetails
+  deriving (Eq, Show)
+
+data EventDetails
   = EventSyscallEnter EventSyscallEnterDetails
   | EventSyscallExit EventSyscallExitDetails
   | EventPTraceEvent PTRACE_EVENT
   | EventGroupStop Signal
   | EventSignalDelivery Signal
   | EventProcessDeath ExitCode
+  deriving (Eq, Show)
 
 data EventSyscallEnterDetails = EventSyscallEnterDetails
   { evEnterSyscall :: Syscall
@@ -1475,15 +1479,17 @@ instance ToJSON EventSyscallExitDetails where
   toJSON = toJSON . evExitFormatted
 
 instance ToJSON HatraceEvent where
-  toJSON event =
-    case event of
-      EventSyscallEnter details -> object [ "syscall_enter" .= details ]
-      EventSyscallExit details -> object [ "syscall_exit" .= details ] -- ???
-      EventPTraceEvent ptraceEvent -> object [ "ptrace_event" .= ptraceEvent ]
-      EventGroupStop signal -> object [ "group_stop" .= signalToJSON signal ]
-      EventSignalDelivery signal -> object [ "signal_delivery" .= signalToJSON signal ]
-      EventProcessDeath exitCode -> object [ "process_death" .= exitCodeToJSON exitCode ]
+  toJSON (HatraceEvent pid details) =
+    case details of
+      EventSyscallEnter enterDetails -> formatDetails "syscall_enter" enterDetails
+      EventSyscallExit exitDetails -> formatDetails "syscall_exit" exitDetails
+      EventPTraceEvent ptraceEvent -> formatDetails "ptrace_event" ptraceEvent
+      EventGroupStop signal -> formatDetails "group_stop" (signalToJSON signal)
+      EventSignalDelivery signal -> formatDetails "signal_delivery" (signalToJSON signal)
+      EventProcessDeath exitCode -> formatDetails "process_death" (exitCodeToJSON exitCode)
     where
+      formatDetails eventType eventDetails =
+        object [ "pid" .= show pid, eventType .= eventDetails ]
       -- TODO: we need use better type than unix's barebone Signal equal to CInt
       signalToJSON = show
       -- TODO: use something better
@@ -1494,7 +1500,7 @@ data ReturnOrErrno
   | ErrnoResult ERRNO String
   deriving (Eq, Show)
 
-formatHatraceEventConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, HatraceEvent) m ()
+formatHatraceEventConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) HatraceEvent m ()
 formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
   case event of
 
@@ -1502,28 +1508,28 @@ formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
 
       SyscallEnter (syscall, syscallArgs) -> do
         formatted <- liftIO $ formatSyscallEnter syscall syscallArgs pid
-        return (pid, EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
+        return $ HatraceEvent pid (EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
 
       SyscallExit (syscall, syscallArgs) -> do
         (formatted, outcome) <- liftIO $ formatSyscallExit' syscall syscallArgs pid
-        return (pid, EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
+        return $ HatraceEvent pid (EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
 
     PTRACE_EVENT_Stop ptraceEvent ->
-      return (pid, EventPTraceEvent ptraceEvent)
+      return $ HatraceEvent pid (EventPTraceEvent ptraceEvent)
 
     GroupStop sig ->
-      return (pid, EventGroupStop sig)
+      return $ HatraceEvent pid (EventGroupStop sig)
 
     SignalDeliveryStop sig ->
-      return (pid, EventSignalDelivery sig)
+      return $ HatraceEvent pid (EventSignalDelivery sig)
 
     Death fullStatus ->
-      return (pid, EventProcessDeath fullStatus)
+      return $ HatraceEvent pid (EventProcessDeath fullStatus)
 
-printHatraceEvent :: StringFormattingOptions -> (CPid, HatraceEvent) -> IO ()
-printHatraceEvent formattingOptions (pid, formatted) = do
+printHatraceEvent :: StringFormattingOptions -> HatraceEvent -> IO ()
+printHatraceEvent formattingOptions (HatraceEvent pid details) = do
   putStr $ show [pid] ++ " "
-  case formatted of
+  case details of
     EventSyscallEnter enterDetails ->
       let syscall = evEnterSyscall enterDetails
           formattedSyscall = evEnterFormatted enterDetails
@@ -1555,10 +1561,9 @@ printHatraceEvent formattingOptions (pid, formatted) = do
       putStrLn $ "Process exited with status: " ++ show exitCode
 
 
-printHatraceEventJson :: (CPid, HatraceEvent) -> IO ()
-printHatraceEventJson (pid, formatted) = do
-  let pid' = fromIntegral pid :: Int
-  BS.putStr $ BSL.toStrict $ encode (pid', formatted)
+printHatraceEventJson :: HatraceEvent -> IO ()
+printHatraceEventJson hatraceEvent = do
+  BS.putStr $ BSL.toStrict $ encode hatraceEvent
   BS.putStr "\n"
 
 
@@ -1709,7 +1714,7 @@ traceForkProcess ::
      (HasCallStack)
   => FilePath
   -> [String]
-  -> ((CPid, HatraceEvent) -> IO ())
+  -> (HatraceEvent -> IO ())
   -> IO ExitCode
 traceForkProcess name args printEvent = do
   argv <- procToArgv name args
