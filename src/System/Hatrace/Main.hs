@@ -11,12 +11,14 @@ import           Control.Applicative (many)
 import           Control.Monad (forM_, unless)
 import           Data.Either (partitionEithers)
 import qualified Data.Map as Map
-import           Options.Applicative (Parser, argument, str, metavar, flag', long, help, optional, switch)
+import           Options.Applicative ( Parser, argument, auto, str, metavar, flag', long, help
+                                     , option, value)
 import qualified Options.Applicative as Opts
 import           System.Exit (exitWith)
 import           System.FilePath (splitPath)
 
 import           System.Hatrace
+import           System.Hatrace.Format
 
 data Filter =
   FilterAtomicWrites
@@ -26,23 +28,56 @@ data Filter =
 data CLIArgs = CLIArgs
   { cliProgram :: FilePath
   , cliArgs :: [String]
-  , cliFilter :: Maybe Filter
-  , cliJsonOutput :: Bool
+  , cliRunMode :: RunMode
   } deriving (Eq, Ord, Show)
 
+data RunMode
+  = FilterMode Filter
+  | TraceMode OutputOptions
+  deriving (Eq, Ord, Show)
+
+data OutputOptions
+  = JsonOutput
+  | StandardOutput StringFormattingOptions
+  deriving (Eq, Ord, Show)
 
 cliArgsParser :: Parser CLIArgs
 cliArgsParser = do
   cliProgram <- argument str (metavar "PROGRAM")
   cliArgs <- many (argument str (metavar "PROGRAM_ARG"))
-  cliFilter <- optional $ flag' FilterAtomicWrites
-              ( long "find-nonatomic-writes"
-              <> help "find file writes without a following rename to a persistent location" )
-  cliJsonOutput <- switch
-                   ( long "json-output"
-                   <> help "use JSON for output formatting" )
-  pure $ CLIArgs{ cliProgram, cliArgs, cliFilter, cliJsonOutput }
+  cliRunMode <- modeParser
+  pure $ CLIArgs{ cliProgram, cliArgs, cliRunMode }
 
+modeParser :: Parser RunMode
+modeParser =
+  filterParser Opts.<|> traceParser
+  where
+    filterParser = flag' (FilterMode FilterAtomicWrites)
+                   ( long "find-nonatomic-writes"
+                   <> help "find file writes without a following rename to a persistent location" )
+    traceParser = TraceMode <$> (traceJsonParser Opts.<|> traceStdParser)
+    traceJsonParser = flag' JsonOutput
+                      ( long "json-output"
+                      <> help "use JSON for output formatting" )
+    traceStdParser = StandardOutput <$> stringOptionsParser
+
+stringOptionsParser :: Parser StringFormattingOptions
+stringOptionsParser = do
+  sfoStringLengthLimit <- option auto
+                          ( long "string-length-limit"
+                          <> value (sfoStringLengthLimit defaultStringFormattingOptions)
+                          <> help "set upper length limit for strings in output" )
+  sfoListLengthLimit <- option auto
+                          ( long "list-length-limit"
+                          <> value (sfoListLengthLimit defaultStringFormattingOptions)
+                          <> help "set upper length limit for number of list elements in output" )
+  sfoStructFieldsLimit <- option auto
+                          ( long "struct-field-num-limit"
+                          <> value (sfoStructFieldsLimit defaultStringFormattingOptions)
+                          <> help "set upper length limit for number of struct fields in output" )
+  pure $ StringFormattingOptions{ sfoStringLengthLimit
+                                , sfoListLengthLimit
+                                , sfoStructFieldsLimit }
 
 -- | Parses the command line arguments for this program.
 parseArgs :: IO CLIArgs
@@ -57,18 +92,17 @@ main = do
   CLIArgs
     { cliProgram
     , cliArgs
-    , cliFilter
-    , cliJsonOutput
+    , cliRunMode
     } <- parseArgs
 
-  case cliFilter of
-    Nothing -> do
-      let printer = if cliJsonOutput
-                    then printHatraceEventJson
-                    else printHatraceEvent
+  case cliRunMode of
+    TraceMode outputFormat -> do
+      let printer = case outputFormat of
+            JsonOutput -> printHatraceEventJson
+            StandardOutput opts -> printHatraceEvent opts
       exitCode <- traceForkProcess cliProgram cliArgs printer
       exitWith exitCode
-    Just FilterAtomicWrites -> do
+    FilterMode FilterAtomicWrites -> do
       argv <- procToArgv cliProgram cliArgs
       (exitCode, entries) <- sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
       let ignoredPath [] = error "paths are not supposed to be empty"

@@ -1520,15 +1520,15 @@ formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
     Death fullStatus ->
       return (pid, EventProcessDeath fullStatus)
 
-printHatraceEvent :: (CPid, HatraceEvent) -> IO ()
-printHatraceEvent (pid, formatted) = do
+printHatraceEvent :: StringFormattingOptions -> (CPid, HatraceEvent) -> IO ()
+printHatraceEvent formattingOptions (pid, formatted) = do
   putStr $ show [pid] ++ " "
   case formatted of
     EventSyscallEnter enterDetails ->
       let syscall = evEnterSyscall enterDetails
           formattedSyscall = evEnterFormatted enterDetails
       in putStrLn $ "Entering syscall: " ++ show syscall ++ ", details: " ++
-           syscallToString defaultStringFormattingOptions formattedSyscall
+           syscallToString formattingOptions formattedSyscall
 
     EventSyscallExit exitDetails ->
       let syscall = evExitSyscall exitDetails
@@ -1540,7 +1540,7 @@ printHatraceEvent (pid, formatted) = do
               in FormattedReturn $ FixedArg $
                    show errno ++ formattedErrno  -- TODO should we handle it some other way?
       in putStrLn $ "Exited syscall: " ++ show syscall ++ ", details: " ++
-        syscallExitToString defaultStringFormattingOptions (formattedSyscall, outcome)
+        syscallExitToString formattingOptions (formattedSyscall, outcome)
 
     EventPTraceEvent ptraceEvent ->
       putStrLn $ "Got event: " ++ show ptraceEvent

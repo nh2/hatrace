@@ -101,7 +101,7 @@ data StringFormattingOptions = StringFormattingOptions
   { sfoStringLengthLimit :: Int
   , sfoListLengthLimit :: Int
   , sfoStructFieldsLimit :: Int
-  } deriving (Eq, Show)
+  } deriving (Eq, Ord, Show)
 
 defaultStringFormattingOptions :: StringFormattingOptions
 defaultStringFormattingOptions = StringFormattingOptions
