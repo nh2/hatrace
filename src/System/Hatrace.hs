@@ -80,6 +80,8 @@ module System.Hatrace
   , SyscallExitDetails_recv(..)
   , SyscallEnterDetails_recvfrom(..)
   , SyscallExitDetails_recvfrom(..)
+  , SyscallEnterDetails_socketpair(..)
+  , SyscallExitDetails_socketpair(..)
   , SyscallEnterDetails_mmap(..)
   , SyscallExitDetails_mmap(..)
   , SyscallEnterDetails_munmap(..)
@@ -1424,6 +1426,37 @@ instance SyscallExitFormatting SyscallExitDetails_recvfrom where
       SyscallEnterDetails_recvfrom{ fd, size, flags, addr, addrlen } = enterDetail
 
 
+data SyscallEnterDetails_socketpair = SyscallEnterDetails_socketpair
+  { domain :: CInt
+  , type_ :: CInt
+  , protocol :: CInt
+  , sv :: Ptr CInt
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallEnterFormatting SyscallEnterDetails_socketpair where
+  syscallEnterToFormatted SyscallEnterDetails_socketpair{ domain, type_, protocol, sv } =
+    FormattedSyscall "socketpair" [ formatArg domain, formatArg type_, formatArg protocol
+                                  , formatPtrArg "int" sv ]
+
+
+data SyscallExitDetails_socketpair = SyscallExitDetails_socketpair
+  { enterDetail :: SyscallEnterDetails_socketpair
+  , sockfd1 :: CInt
+  , sockfd2 :: CInt
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallExitFormatting SyscallExitDetails_socketpair where
+  syscallExitToFormatted SyscallExitDetails_socketpair{ enterDetail, sockfd1, sockfd2 } =
+    ( FormattedSyscall "socketpair" [ formatArg domain, formatArg type_, formatArg protocol
+                                    , formatArg [sockfd1, sockfd2]
+                                    ]
+    , NoReturn)
+    where
+      SyscallEnterDetails_socketpair{ domain, type_, protocol } = enterDetail
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1454,6 +1487,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_sendto SyscallEnterDetails_sendto
   | DetailedSyscallEnter_recv SyscallEnterDetails_recv
   | DetailedSyscallEnter_recvfrom SyscallEnterDetails_recvfrom
+  | DetailedSyscallEnter_socketpair SyscallEnterDetails_socketpair
   | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
   | DetailedSyscallEnter_munmap SyscallEnterDetails_munmap
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
@@ -1501,6 +1535,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_sendto SyscallExitDetails_sendto
   | DetailedSyscallExit_recv SyscallExitDetails_recv
   | DetailedSyscallExit_recvfrom SyscallExitDetails_recvfrom
+  | DetailedSyscallExit_socketpair SyscallExitDetails_socketpair
   | DetailedSyscallExit_mmap SyscallExitDetails_mmap
   | DetailedSyscallExit_munmap SyscallExitDetails_munmap
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
@@ -1826,6 +1861,15 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , addr = addrPtr
       , addrlen = addrlenPtr
       }
+  Syscall_socketpair -> do
+    let SyscallArgs{ arg0 = domain, arg1 = type_, arg2 = protocol, arg3 = svAddr } = syscallArgs
+    let svPtr = word64ToPtr svAddr
+    pure $ DetailedSyscallEnter_socketpair $ SyscallEnterDetails_socketpair
+      { domain = fromIntegral domain
+      , type_ = fromIntegral type_
+      , protocol = fromIntegral protocol
+      , sv = svPtr
+      }
   Syscall_munmap -> do
     let SyscallArgs{ arg0 = addr, arg1 = len } = syscallArgs
     let addrPtr = word64ToPtr addr
@@ -2135,6 +2179,12 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                 bufContents <- peekBytes (TracedProcess pid) ubuf (fromIntegral result)
                 pure $ DetailedSyscallExit_recvfrom $
                   SyscallExitDetails_recvfrom{ enterDetail, numReceived = fromIntegral result, bufContents }
+
+            DetailedSyscallEnter_socketpair
+              enterDetail@SyscallEnterDetails_socketpair{ sv } -> do
+                (sockfd1, sockfd2) <- readPipeFds pid sv -- TODO correct?
+                pure $ DetailedSyscallExit_socketpair $
+                  SyscallExitDetails_socketpair{ enterDetail, sockfd1, sockfd2 }
 
             DetailedSyscallEnter_mmap
               enterDetail@SyscallEnterDetails_mmap{} -> do
@@ -2654,6 +2704,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_recvfrom details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_socketpair details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2778,6 +2830,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_recv details -> formatDetails details
 
     DetailedSyscallExit_recvfrom details -> formatDetails details
+
+    DetailedSyscallExit_socketpair details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
