@@ -1,13 +1,16 @@
+EXAMPLE_SRC := example-programs
+EXAMPLE_DST := example-programs-build
+
 EXAMPLE_PROGRAMS :=
-EXAMPLE_PROGRAMS += example-programs-build/hello-linux-i386
-EXAMPLE_PROGRAMS += example-programs-build/hello-linux-i386-elf64
-EXAMPLE_PROGRAMS += example-programs-build/hello-linux-x86_64
-EXAMPLE_PROGRAMS += example-programs-build/segfault
-EXAMPLE_PROGRAMS += example-programs-build/execve
-EXAMPLE_PROGRAMS += example-programs-build/execve-linux-null-envp
-EXAMPLE_PROGRAMS += example-programs-build/atomic-write
-EXAMPLE_PROGRAMS += example-programs-build/write-EBADF
-EXAMPLE_PROGRAMS += example-programs-build/access-itself
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-i386
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-i386-elf64
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-x86_64
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/segfault
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve-linux-null-envp
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/atomic-write
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/write-EBADF
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/access-itself
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
@@ -16,30 +19,30 @@ example-programs: $(EXAMPLE_PROGRAMS)
 # syscalls related to dynamic loading, thus avoiding a syscall flood
 # unrelated to the key thing each program does.
 
-example-programs-build/%-i386: example-programs/%-i386.asm
-	mkdir -p example-programs-build
+$(EXAMPLE_DST)/%-i386: $(EXAMPLE_SRC)/%-i386.asm
+	mkdir -p $(EXAMPLE_DST)
 	nasm -Wall -Werror -f elf $< -o $@.o
 	ld -m elf_i386 -e _start $@.o -o $@
 	rm $@.o
 
-example-programs-build/%-i386-elf64: example-programs/%-i386.asm
-	mkdir -p example-programs-build
+$(EXAMPLE_DST)/%-i386-elf64: $(EXAMPLE_SRC)/%-i386.asm
+	mkdir -p $(EXAMPLE_DST)
 	nasm -Wall -Werror -f elf64 $< -o $@.o
 	ld -e _start $@.o -o $@
 	rm $@.o
 
-example-programs-build/%-x86_64: example-programs/%-x86_64.asm
-	mkdir -p example-programs-build
+$(EXAMPLE_DST)/%-x86_64: $(EXAMPLE_SRC)/%-x86_64.asm
+	mkdir -p $(EXAMPLE_DST)
 	nasm -Wall -Werror -f elf64 $< -o $@.o
 	ld -e _start $@.o -o $@
 	rm $@.o
 
-example-programs-build/%: example-programs/%.asm
-	mkdir -p example-programs-build
+$(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.asm
+	mkdir -p $(EXAMPLE_DST)
 	nasm -Wall -Werror -f elf64 $< -o $@.o
 	ld -e _start $@.o -o $@
 	rm $@.o
 
-example-programs-build/%: example-programs/%.c
-	mkdir -p example-programs-build
+$(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.c
+	mkdir -p $(EXAMPLE_DST)
 	gcc -static -std=c99 -Wall -Werror $< -o $@
