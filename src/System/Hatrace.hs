@@ -59,6 +59,8 @@ module System.Hatrace
   , SyscallExitDetails_exit(..)
   , SyscallEnterDetails_exit_group(..)
   , SyscallExitDetails_exit_group(..)
+  , SyscallEnterDetails_symlink(..)
+  , SyscallExitDetails_symlink(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -629,6 +631,17 @@ data SyscallExitDetails_execve = SyscallExitDetails_execve
   , execveResult :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_symlink = SyscallEnterDetails_symlink
+  { target :: Ptr CChar
+  , linkpath :: Ptr CChar
+  -- Peeked details
+  , targetBS :: ByteString
+  , linkpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_symlink = SyscallExitDetails_symlink
+  { enterDetail :: SyscallEnterDetails_symlink
+  } deriving (Eq, Ord, Show)
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -651,6 +664,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_newfstatat SyscallEnterDetails_newfstatat
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
+  | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -676,6 +690,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_newfstatat SyscallExitDetails_newfstatat
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
+  | DetailedSyscallExit_symlink SyscallExitDetails_symlink
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -893,6 +908,18 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
   Syscall_exit_group -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit_group $ SyscallEnterDetails_exit_group { status = fromIntegral status }
+  Syscall_symlink -> do
+    let SyscallArgs{ arg0 = targetAddr, arg1 = linkpathAddr } = syscallArgs
+    let targetPtr = word64ToPtr targetAddr
+    let linkpathPtr = word64ToPtr linkpathAddr
+    targetBS <- peekNullTerminatedBytes proc targetPtr
+    linkpathBS <- peekNullTerminatedBytes proc linkpathPtr
+    pure $ DetailedSyscallEnter_symlink $ SyscallEnterDetails_symlink
+      { target = targetPtr
+      , linkpath = linkpathPtr
+      , targetBS
+      , linkpathBS
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1028,6 +1055,11 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
               enterDetail@SyscallEnterDetails_exit_group{} -> do
                 pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
 
+            DetailedSyscallEnter_symlink
+              enterDetail@SyscallEnterDetails_symlink{} -> do
+                pure $ DetailedSyscallExit_symlink $
+                  SyscallExitDetails_symlink{ enterDetail }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1141,6 +1173,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_exit_group{ status } ->
       "exit_group(" ++ show status ++ ")"
 
+  DetailedSyscallEnter_symlink
+    SyscallEnterDetails_symlink{ targetBS, linkpathBS } ->
+      "symlink(" ++ show targetBS ++ ", " ++ show linkpathBS ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1244,6 +1280,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_exit_group
     SyscallExitDetails_exit_group{ enterDetail = SyscallEnterDetails_exit_group{ status }} ->
       "exit_group(" ++ show status ++ ")"
+
+  DetailedSyscallExit_symlink
+    SyscallExitDetails_symlink{ enterDetail = SyscallEnterDetails_symlink{ targetBS, linkpathBS }} ->
+      "symlink(" ++ show targetBS ++ ", " ++ show linkpathBS ++ ")"
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
