@@ -680,6 +680,31 @@ spec = before_ assertNoChildren $ do
               ]
             (af_UNIX, sock_STREAM) = (1, 1)
         args `shouldBe` [(af_UNIX, sock_STREAM)]
+      it "seen when using sendto/recvfrom on a socketpair" $ do
+        let sockets = "example-programs-build/sockets"
+        callProcess "make" ["--quiet", sockets]
+        argv <- procToArgv sockets ["sendrecv"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let recv =
+              [ bufContents
+              | (_pid
+                , Right (DetailedSyscallExit_recvfrom
+                         SyscallExitDetails_recvfrom
+                         { bufContents })
+                ) <- events
+              ]
+        let send =
+              [ bufContents
+              | (_pid
+                , Right (DetailedSyscallExit_sendto
+                         SyscallExitDetails_sendto
+                         { enterDetail = SyscallEnterDetails_sendto{ bufContents } })
+                ) <- events
+              ]
+        recv `shouldBe` send
 
     describe "lstat" $ do
       it "seen called by stat executable" $ do
