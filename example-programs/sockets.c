@@ -78,9 +78,29 @@ void open_socketpair(void)
 	close(socks[1]);
 }
 
+void open_sendrecv(void)
+{
+	char buf[500];
+	int socks[2];
+	int ret;
+
+	ret = socketpair(AF_UNIX, SOCK_STREAM, 0, socks);
+	if (ret < 0) {
+		perror("socketpair");
+		exit(1);
+	}
+
+	sendto(socks[0], "pwet\n", 6, 0, NULL, 0);
+	recvfrom(socks[1], buf, sizeof(buf), 0, NULL, NULL);
+
+	close(socks[0]);
+	close(socks[1]);
+}
+
 enum testid {
 	TEST_SOCKET = 0,
 	TEST_SOCKETPAIR,
+	TEST_SENDRECV,
 	TEST_MAX,
 };
 
@@ -97,6 +117,10 @@ struct testdesc tests[TEST_MAX] = {
 	[TEST_SOCKETPAIR] = {
 		.name = "socketpair",
 		.fct = open_socketpair,
+	},
+	[TEST_SENDRECV] = {
+		.name = "sendrecv",
+		.fct = open_sendrecv,
 	},
 };
 
