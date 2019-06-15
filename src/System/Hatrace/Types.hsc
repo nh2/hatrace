@@ -24,9 +24,8 @@ import           Data.Bits
 import qualified Data.ByteString as BS
 import           Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import           Data.List (intercalate)
-import           Data.Word (Word32, Word64)
+import           Data.Word (Word64)
 import           Foreign.C.Types (CInt(..), CUShort(..), CUInt(..), CULong(..), CChar, CUChar)
-import           Foreign.C.String (peekCString, newCString)
 import           Foreign.Storable (Storable(..))
 import           Foreign.Ptr
 import           System.Linux.Ptrace (TracedProcess(..), peekBytes)
@@ -203,12 +202,12 @@ peekNetlinkSockAddr :: Ptr CChar -> IO NetlinkSockAddr
 peekNetlinkSockAddr ptr = do
   family <- #{peek struct sockaddr_nl, nl_family} ptr
   pad   <- #{peek struct sockaddr_nl, nl_pad} ptr
-  pid   <- #{peek struct sockaddr_nl, nl_pid} ptr
+  pidNl   <- #{peek struct sockaddr_nl, nl_pid} ptr
   groups   <- #{peek struct sockaddr_nl, nl_groups} ptr
   return NetlinkSockAddr {
     nl_family = family,
     nl_pad = pad,
-    nl_pid = pid,
+    nl_pid = pidNl,
     nl_groups = groups
   }
 
