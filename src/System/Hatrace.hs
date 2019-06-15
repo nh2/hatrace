@@ -70,6 +70,8 @@ module System.Hatrace
   , SyscallExitDetails_socket(..)
   , SyscallEnterDetails_listen(..)
   , SyscallExitDetails_listen(..)
+  , SyscallEnterDetails_shutdown(..)
+  , SyscallExitDetails_shutdown(..)
   , SyscallEnterDetails_mmap(..)
   , SyscallExitDetails_mmap(..)
   , SyscallEnterDetails_munmap(..)
@@ -1267,8 +1269,30 @@ data SyscallExitDetails_listen = SyscallExitDetails_listen
   { enterDetail :: SyscallEnterDetails_listen
   } deriving (Eq, Ord, Show)
 
+
 instance SyscallExitFormatting SyscallExitDetails_listen where
   syscallExitToFormatted SyscallExitDetails_listen{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
+data SyscallEnterDetails_shutdown = SyscallEnterDetails_shutdown
+  { fd :: CInt
+  , how :: CInt
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallEnterFormatting SyscallEnterDetails_shutdown where
+  syscallEnterToFormatted SyscallEnterDetails_shutdown{ fd, how } =
+    FormattedSyscall "shutdown" [ formatArg fd, formatArg how ]
+
+
+data SyscallExitDetails_shutdown = SyscallExitDetails_shutdown
+  { enterDetail :: SyscallEnterDetails_shutdown
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallExitFormatting SyscallExitDetails_shutdown where
+  syscallExitToFormatted SyscallExitDetails_shutdown{ enterDetail } =
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
@@ -1297,6 +1321,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_socket SyscallEnterDetails_socket
   | DetailedSyscallEnter_listen SyscallEnterDetails_listen
+  | DetailedSyscallEnter_shutdown SyscallEnterDetails_shutdown
   | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
   | DetailedSyscallEnter_munmap SyscallEnterDetails_munmap
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
@@ -1339,6 +1364,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_socket SyscallExitDetails_socket
   | DetailedSyscallExit_listen SyscallExitDetails_listen
+  | DetailedSyscallExit_shutdown SyscallExitDetails_shutdown
   | DetailedSyscallExit_mmap SyscallExitDetails_mmap
   | DetailedSyscallExit_munmap SyscallExitDetails_munmap
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
@@ -1599,6 +1625,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_listen $ SyscallEnterDetails_listen
       { fd = fromIntegral fd
       , backlog = fromIntegral backlog
+      }
+  Syscall_shutdown -> do
+    let SyscallArgs{ arg0 = fd, arg1 = how } = syscallArgs
+    pure $ DetailedSyscallEnter_shutdown $ SyscallEnterDetails_shutdown
+      { fd = fromIntegral fd
+      , how = fromIntegral how
       }
   Syscall_mmap -> do
     let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = prot, arg3 = flags, arg4 = fd, arg5 = offset } = syscallArgs
@@ -1894,6 +1926,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
               enterDetail@SyscallEnterDetails_listen{} -> do
                 pure $ DetailedSyscallExit_listen $
                   SyscallExitDetails_listen{ enterDetail }
+
+            DetailedSyscallEnter_shutdown
+              enterDetail@SyscallEnterDetails_shutdown{} -> do
+                pure $ DetailedSyscallExit_shutdown $
+                  SyscallExitDetails_shutdown{ enterDetail }
 
             DetailedSyscallEnter_mmap
               enterDetail@SyscallEnterDetails_mmap{} -> do
@@ -2403,6 +2440,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_listen details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_shutdown details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2517,6 +2556,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_socket details -> formatDetails details
 
     DetailedSyscallExit_listen details -> formatDetails details
+
+    DetailedSyscallExit_shutdown details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
