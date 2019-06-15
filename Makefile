@@ -59,3 +59,7 @@ example-programs-build/write-EBADF: example-programs/write-EBADF.c
 example-programs-build/access-itself: example-programs/access-itself.c
 	mkdir -p example-programs-build
 	gcc -static -std=c99 -Wall -Werror example-programs/access-itself.c -o example-programs-build/access-itself
+
+example-programs-build/connect: example-programs/connect.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/connect.c -o example-programs-build/connect

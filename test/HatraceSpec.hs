@@ -549,3 +549,14 @@ spec = before_ assertNoChildren $ do
               ]
             x_OK = 1
         accessModesRequested `shouldBe` [x_OK]
+
+    describe "connect" $ do
+      it "seen when invoked in a program" $ do
+        let connect = "example-programs-build/connect"
+        callProcess "make" ["--quiet", connect]
+        argv <- procToArgv connect ["0"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+
