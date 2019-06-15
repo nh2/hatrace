@@ -131,12 +131,12 @@ argToString options arg =
     limitedList =
       sizeLimited (sfoListLengthLimit options)
                   (joinWithCommas . map (argToString options))
-                  " ..."
+                  ", ..."
     structToString fields = "{" ++ limitedStruct fields ++ "}"
     limitedStruct =
       sizeLimited (sfoStructFieldsLimit options)
                   (joinWithCommas . map structFieldToString)
-                  " ..."
+                  ", ..."
     structFieldToString (fieldName, v) = fieldName ++ "=" ++ (argToString options) v
 
 syscallExitToString :: StringFormattingOptions -> (FormattedSyscall, FormattedReturn) -> String
