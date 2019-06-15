@@ -61,6 +61,8 @@ module System.Hatrace
   , SyscallExitDetails_exit_group(..)
   , SyscallEnterDetails_socket(..)
   , SyscallExitDetails_socket(..)
+  , SyscallEnterDetails_listen(..)
+  , SyscallExitDetails_listen(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -643,6 +645,16 @@ data SyscallExitDetails_socket = SyscallExitDetails_socket
   , fd :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_listen = SyscallEnterDetails_listen
+  { fd :: CInt
+  , backlog :: CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_listen = SyscallExitDetails_listen
+  { enterDetail :: SyscallEnterDetails_listen
+  , retval :: CInt
+  } deriving (Eq, Ord, Show)
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -666,6 +678,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_socket SyscallEnterDetails_socket
+  | DetailedSyscallEnter_listen SyscallEnterDetails_listen
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -692,6 +705,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_socket SyscallExitDetails_socket
+  | DetailedSyscallExit_listen SyscallExitDetails_listen
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -916,6 +930,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , type_ = fromIntegral type_
       , protocol = fromIntegral protocol
       }
+  Syscall_listen -> do
+    let SyscallArgs{ arg0 = fd, arg1 = backlog } = syscallArgs
+    pure $ DetailedSyscallEnter_listen $ SyscallEnterDetails_listen
+      { fd = fromIntegral fd
+      , backlog = fromIntegral backlog
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1056,6 +1076,11 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_socket $
                   SyscallExitDetails_socket{ enterDetail, fd = fromIntegral result }
 
+            DetailedSyscallEnter_listen
+              enterDetail@SyscallEnterDetails_listen{} -> do
+                pure $ DetailedSyscallExit_listen $
+                  SyscallExitDetails_listen{ enterDetail, retval = fromIntegral result }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1173,6 +1198,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_socket{ domain, type_, protocol } ->
       "socket(" ++ show domain ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ")"
 
+  DetailedSyscallEnter_listen
+    SyscallEnterDetails_listen{ fd, backlog } ->
+      "listen(" ++ show fd ++ ", " ++ show backlog ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1280,6 +1309,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_socket
     SyscallExitDetails_socket{ enterDetail = SyscallEnterDetails_socket{ domain, type_, protocol }, fd } ->
       "socket(" ++ show domain ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ") = " ++ show fd
+
+  DetailedSyscallExit_listen
+    SyscallExitDetails_listen{ enterDetail = SyscallEnterDetails_listen{ fd, backlog }, retval } ->
+      "listen(" ++ show fd ++ ", " ++ show backlog ++ ") = " ++ show retval
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
