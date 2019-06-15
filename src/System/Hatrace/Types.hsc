@@ -13,6 +13,7 @@ module System.Hatrace.Types
   , HatraceShow(..)
   , addressFamilyName
   , socketTypeName
+  , shutdownTypeName
   ) where
 
 import           Data.Bits
@@ -203,3 +204,10 @@ socketTypeName sock = case sock of
   (#const SOCK_DCCP) -> "SOCK_DCCP"
   (#const SOCK_PACKET) -> "SOCK_PACKET"
   _ -> "SOCK_" ++ show sock
+
+shutdownTypeName :: CInt -> String
+shutdownTypeName how = case how of
+  (#const SHUT_RD) -> "SHUT_RD"
+  (#const SHUT_WR) -> "SHUT_WR"
+  (#const SHUT_RDWR) -> "SHUT_RDWR"
+  _ -> "SHUT_" ++ show how

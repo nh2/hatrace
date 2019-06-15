@@ -1406,7 +1406,7 @@ formatDetailedSyscallEnter = \case
 
   DetailedSyscallEnter_shutdown
     SyscallEnterDetails_shutdown{ fd, how } ->
-      "shutdown(" ++ show fd ++ ", " ++ show how ++ ")"
+      "shutdown(" ++ show fd ++ ", " ++ shutdownTypeName how ++ ")"
 
   DetailedSyscallEnter_send
     SyscallEnterDetails_send{ fd, bufContents, len, flags } ->
@@ -1542,7 +1542,7 @@ formatDetailedSyscallExit = \case
 
   DetailedSyscallExit_shutdown
     SyscallExitDetails_shutdown{ enterDetail = SyscallEnterDetails_shutdown{ fd, how }, retval } ->
-      "shutdown(" ++ show fd ++ ", " ++ show how ++ ") = " ++ show retval
+      "shutdown(" ++ show fd ++ ", " ++ shutdownTypeName how ++ ") = " ++ show retval
 
   DetailedSyscallExit_send
     SyscallExitDetails_send{ enterDetail = SyscallEnterDetails_send{ fd, bufContents, len, flags }, retval } ->
