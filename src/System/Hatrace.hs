@@ -73,6 +73,8 @@ module System.Hatrace
   , SyscallExitDetails_recv(..)
   , SyscallEnterDetails_recvfrom(..)
   , SyscallExitDetails_recvfrom(..)
+  , SyscallEnterDetails_socketpair(..)
+  , SyscallExitDetails_socketpair(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -735,6 +737,20 @@ data SyscallExitDetails_recvfrom = SyscallExitDetails_recvfrom
   , bufContents :: ByteString
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_socketpair = SyscallEnterDetails_socketpair
+  { family :: CInt
+  , type_ :: CInt
+  , protocol :: CInt
+  , usockvec :: Ptr CInt
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_socketpair = SyscallExitDetails_socketpair
+  { enterDetail :: SyscallEnterDetails_socketpair
+  , retval :: CInt
+  , sockfd1 :: CInt
+  , sockfd2 :: CInt
+  } deriving (Eq, Ord, Show)
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -764,6 +780,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_sendto SyscallEnterDetails_sendto
   | DetailedSyscallEnter_recv SyscallEnterDetails_recv
   | DetailedSyscallEnter_recvfrom SyscallEnterDetails_recvfrom
+  | DetailedSyscallEnter_socketpair SyscallEnterDetails_socketpair
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -796,6 +813,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_sendto SyscallExitDetails_sendto
   | DetailedSyscallExit_recv SyscallExitDetails_recv
   | DetailedSyscallExit_recvfrom SyscallExitDetails_recvfrom
+  | DetailedSyscallExit_socketpair SyscallExitDetails_socketpair
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1079,6 +1097,15 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , addr = addrPtr
       , addr_len = addr_lenPtr
       }
+  Syscall_socketpair -> do
+    let SyscallArgs{ arg0 = family, arg1 = type_, arg2 = protocol, arg3 = usockvecAddr } = syscallArgs
+    let usockvecPtr = word64ToPtr usockvecAddr
+    pure $ DetailedSyscallEnter_socketpair $ SyscallEnterDetails_socketpair
+      { family = fromIntegral family
+      , type_ = fromIntegral type_
+      , protocol = fromIntegral protocol
+      , usockvec = usockvecPtr
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -1250,6 +1277,12 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_recvfrom $
                   SyscallExitDetails_recvfrom{ enterDetail, retval = fromIntegral result, bufContents }
 
+            DetailedSyscallEnter_socketpair
+              enterDetail@SyscallEnterDetails_socketpair{ usockvec } -> do
+                (sockfd1, sockfd2) <- readPipeFds pid usockvec -- TODO correct?
+                pure $ DetailedSyscallExit_socketpair $
+                  SyscallExitDetails_socketpair{ enterDetail, retval = fromIntegral result, sockfd1, sockfd2 }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1391,6 +1424,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_recvfrom{ fd, ubuf, size, flags, addr, addr_len } ->
       "recvfrom(" ++ show fd ++ ", " ++ show ubuf ++ ", " ++ show size ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ")"
 
+  DetailedSyscallEnter_socketpair -- TODO fds
+    SyscallEnterDetails_socketpair{ family, type_, protocol, usockvec } ->
+      "socketpair(" ++ show family ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ", " ++ show usockvec ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1522,6 +1559,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_recvfrom -- TODO sockaddr + buf
     SyscallExitDetails_recvfrom{ enterDetail = SyscallEnterDetails_recvfrom{ fd, size, flags, addr, addr_len }, retval, bufContents } ->
       "recvfrom(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show size ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ") = " ++ show retval
+
+  DetailedSyscallExit_socketpair
+    SyscallExitDetails_socketpair{ enterDetail = SyscallEnterDetails_socketpair{ family, type_, protocol }, retval, sockfd1, sockfd2 } ->
+      "socketpair(" ++ show family ++ ", " ++ show type_ ++ ", " ++ show protocol ++ ", [" ++ show sockfd1 ++ ", " ++ show sockfd2 ++ "]) = " ++ show retval
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
