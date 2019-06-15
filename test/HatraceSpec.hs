@@ -662,6 +662,24 @@ spec = before_ assertNoChildren $ do
             (af_UNIX, af_INET, af_INET6) = (1, 2, 10)
             (sock_STREAM, sock_DGRAM) = (1, 2)
         (take 6 args) `shouldBe` [(af_INET, sock_STREAM), (af_INET6, sock_STREAM), (af_INET, sock_DGRAM), (af_INET6, sock_DGRAM), (af_UNIX, sock_STREAM), (af_UNIX, sock_DGRAM)]
+      it "seen when opening a socketpair" $ do
+        let sockets = "example-programs-build/sockets"
+        callProcess "make" ["--quiet", sockets]
+        argv <- procToArgv sockets ["socketpair"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let args =
+              [ (domain, type_)
+              | (_pid
+                , Right (DetailedSyscallExit_socketpair
+                         SyscallExitDetails_socketpair
+                         { enterDetail = SyscallEnterDetails_socketpair{ domain, type_ } })
+                ) <- events
+              ]
+            (af_UNIX, sock_STREAM) = (1, 1)
+        args `shouldBe` [(af_UNIX, sock_STREAM)]
 
     describe "lstat" $ do
       it "seen called by stat executable" $ do

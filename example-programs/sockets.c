@@ -24,7 +24,7 @@ void socket_fail(int sock)
 
 void die_usage(void)
 {
-	fprintf(stderr, "Usage: sockets\n");
+	fprintf(stderr, "Usage: sockets <socket | socketpair>\n");
 	exit(1);
 }
 
@@ -63,8 +63,24 @@ void open_sockets(void)
 	socket_fail(sock);
 }
 
+void open_socketpair(void)
+{
+	int socks[2];
+	int ret;
+
+	ret = socketpair(AF_UNIX, SOCK_STREAM, 0, socks);
+	if (ret < 0) {
+		perror("socketpair");
+		exit(1);
+	}
+
+	close(socks[0]);
+	close(socks[1]);
+}
+
 enum testid {
 	TEST_SOCKET = 0,
+	TEST_SOCKETPAIR,
 	TEST_MAX,
 };
 
@@ -77,6 +93,10 @@ struct testdesc tests[TEST_MAX] = {
 	[TEST_SOCKET] = {
 		.name = "socket",
 		.fct = open_sockets,
+	},
+	[TEST_SOCKETPAIR] = {
+		.name = "socketpair",
+		.fct = open_socketpair,
 	},
 };
 
