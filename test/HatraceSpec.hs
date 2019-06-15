@@ -539,6 +539,27 @@ spec = before_ assertNoChildren $ do
               ]
         length symlinkEvents `shouldBe` 1
 
+    describe "symlinkat" $ do
+      it "seen exactly once for './symlinkat" $ do
+        callProcess "make" ["--quiet", "example-programs-build/symlinkat"]
+        tmpFile <- emptySystemTempFile "test-output"
+        let symlinkPath = tmpFile ++ "symlink"
+        argv <- procToArgv "example-programs-build/symlinkat" [tmpFile, symlinkPath]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let symlinkEvents =
+              [ linkpathBS
+              | (_pid
+                , Right (DetailedSyscallExit_symlinkat
+                         SyscallExitDetails_symlinkat
+                         { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }})
+                ) <- events
+                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+              ]
+        length symlinkEvents `shouldBe` 1
+
     describe "pipe" $ do
       it "seen when piping output in bash" $ do
         argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
