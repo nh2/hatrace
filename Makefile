@@ -11,6 +11,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve-linux-null-envp
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/atomic-write
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/write-EBADF
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/access-itself
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sockets
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)

@@ -556,6 +556,27 @@ spec = before_ assertNoChildren $ do
             x_OK = 1
         accessModesRequested `shouldBe` [x_OK]
 
+    describe "sockets" $ do
+      it "seen when opening sockets" $ do
+        let sockets = "example-programs-build/sockets"
+        callProcess "make" ["--quiet", sockets]
+        argv <- procToArgv sockets ["socket"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let args =
+              [ (domain, type_)
+              | (_pid
+                , Right (DetailedSyscallExit_socket
+                         SyscallExitDetails_socket
+                         { enterDetail = SyscallEnterDetails_socket{ domain, type_ } })
+                ) <- events
+              ]
+            (af_UNIX, af_INET, af_INET6) = (1, 2, 10)
+            (sock_STREAM, sock_DGRAM) = (1, 2)
+        (take 6 args) `shouldBe` [(af_INET, sock_STREAM), (af_INET6, sock_STREAM), (af_INET, sock_DGRAM), (af_INET6, sock_DGRAM), (af_UNIX, sock_STREAM), (af_UNIX, sock_DGRAM)]
+
     describe "lstat" $ do
       it "seen called by stat executable" $ do
         argv <- procToArgv "stat" ["/dev/null"]
