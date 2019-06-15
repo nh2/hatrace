@@ -66,6 +66,8 @@ module System.Hatrace
   , SyscallExitDetails_exit(..)
   , SyscallEnterDetails_exit_group(..)
   , SyscallExitDetails_exit_group(..)
+  , SyscallEnterDetails_socket(..)
+  , SyscallExitDetails_socket(..)
   , SyscallEnterDetails_mmap(..)
   , SyscallExitDetails_mmap(..)
   , SyscallEnterDetails_munmap(..)
@@ -1224,6 +1226,30 @@ instance SyscallExitFormatting SyscallExitDetails_munmap where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
+data SyscallEnterDetails_socket = SyscallEnterDetails_socket
+  { domain :: CInt
+  , type_ :: CInt
+  , protocol :: CInt
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallEnterFormatting SyscallEnterDetails_socket where
+  syscallEnterToFormatted SyscallEnterDetails_socket{ domain, type_, protocol } =
+    FormattedSyscall "socket" [ formatArg domain, formatArg type_, formatArg protocol ]
+
+
+data SyscallExitDetails_socket = SyscallExitDetails_socket
+  { enterDetail :: SyscallEnterDetails_socket
+  , fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallExitFormatting SyscallExitDetails_socket where
+  syscallExitToFormatted SyscallExitDetails_socket{ enterDetail, fd } =
+    ( syscallEnterToFormatted enterDetail
+    , formatReturn fd)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1247,6 +1273,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_newfstatat SyscallEnterDetails_newfstatat
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
+  | DetailedSyscallEnter_socket SyscallEnterDetails_socket
   | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
   | DetailedSyscallEnter_munmap SyscallEnterDetails_munmap
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
@@ -1287,6 +1314,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_newfstatat SyscallExitDetails_newfstatat
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
+  | DetailedSyscallExit_socket SyscallExitDetails_socket
   | DetailedSyscallExit_mmap SyscallExitDetails_mmap
   | DetailedSyscallExit_munmap SyscallExitDetails_munmap
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
@@ -1535,6 +1563,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
   Syscall_exit_group -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit_group $ SyscallEnterDetails_exit_group { status = fromIntegral status }
+  Syscall_socket -> do
+    let SyscallArgs{ arg0 = domain, arg1 = type_, arg2 = protocol } = syscallArgs
+    pure $ DetailedSyscallEnter_socket $ SyscallEnterDetails_socket
+      { domain = fromIntegral domain
+      , type_ = fromIntegral type_
+      , protocol = fromIntegral protocol
+      }
   Syscall_mmap -> do
     let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = prot, arg3 = flags, arg4 = fd, arg5 = offset } = syscallArgs
     let addrPtr = word64ToPtr addr
@@ -1819,6 +1854,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
             DetailedSyscallEnter_exit_group
               enterDetail@SyscallEnterDetails_exit_group{} -> do
                 pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
+
+            DetailedSyscallEnter_socket
+              enterDetail@SyscallEnterDetails_socket{} -> do
+                pure $ DetailedSyscallExit_socket $
+                  SyscallExitDetails_socket{ enterDetail, fd = fromIntegral result }
 
             DetailedSyscallEnter_mmap
               enterDetail@SyscallEnterDetails_mmap{} -> do
@@ -2324,6 +2364,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_unlinkat details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_socket details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2434,6 +2476,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_unlink details -> formatDetails details
 
     DetailedSyscallExit_unlinkat details -> formatDetails details
+
+    DetailedSyscallExit_socket details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
