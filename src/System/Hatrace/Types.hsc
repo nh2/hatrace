@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/sysinfo.h>
 #include <asm/prctl.h>
 #include <poll.h>
@@ -35,6 +36,10 @@ module System.Hatrace.Types
   , GranularAccessProtection(..)
   , noAccess
   , SigSet(..)
+  , AddressFamily(..)
+  , ConcreteAddressFamily(..)
+  , SocketType(..)
+  , SocketDetails(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -464,6 +469,270 @@ instance Storable TimespecStruct where
     #{poke struct timespec, tv_sec} p tv_sec
     #{poke struct timespec, tv_nsec} p tv_nsec
 
+data AddressFamily
+  = AddressFamilyKnown ConcreteAddressFamily
+  | AddressFamilyUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data ConcreteAddressFamily
+  = AddressFamilyUnspecified
+  | AddressFamilyUnix
+  | AddressFamilyInet
+  | AddressFamilyAX25
+  | AddressFamilyIPX
+  | AddressFamilyAppleTalk
+  | AddressFamilyNETROM
+  | AddressFamilyBridge
+  | AddressFamilyATMPVC
+  | AddressFamilyX25
+  | AddressFamilyInet6
+  | AddressFamilyROSE
+  | AddressFamilyDECnet
+  | AddressFamilyNETBEUI
+  | AddressFamilySecurity
+  | AddressFamilyKey
+  | AddressFamilyNetlink
+  | AddressFamilyPacket
+  | AddressFamilyAsh
+  | AddressFamilyEConet
+  | AddressFamilyATMSVC
+  | AddressFamilyRDS
+  | AddressFamilySNA
+  | AddressFamilyIRDA
+  | AddressFamilyPPPoX
+  | AddressFamilywanpipe
+  | AddressFamilyLLC
+  | AddressFamilyIB
+  | AddressFamilyMPLS
+  | AddressFamilyCAN
+  | AddressFamilyTIPC
+  | AddressFamilyBluetooth
+  | AddressFamilyIUCV
+  | AddressFamilyRxRPC
+  | AddressFamilyISDN
+  | AddressFamilyPhonet
+  | AddressFamilyIEEE802154
+  | AddressFamilyCAIF
+  | AddressFamilyAlg
+  | AddressFamilyNFC
+  | AddressFamilyVSock
+  | AddressFamilyKCM
+  | AddressFamilyQIPCRTR
+  | AddressFamilySMC
+  | AddressFamilyXDP
+  deriving (Eq, Ord, Show)
+
+instance CIntRepresentable AddressFamily where
+  toCInt (AddressFamilyKnown family) =
+    case family of
+      AddressFamilyUnspecified -> (#const AF_UNSPEC)
+      AddressFamilyUnix -> (#const AF_UNIX)
+      AddressFamilyInet -> (#const AF_INET)
+      AddressFamilyAX25 -> (#const AF_AX25)
+      AddressFamilyIPX -> (#const AF_IPX)
+      AddressFamilyAppleTalk -> (#const AF_APPLETALK)
+      AddressFamilyNETROM -> (#const AF_NETROM)
+      AddressFamilyBridge -> (#const AF_BRIDGE)
+      AddressFamilyATMPVC -> (#const AF_ATMPVC)
+      AddressFamilyX25 -> (#const AF_X25)
+      AddressFamilyInet6 -> (#const AF_INET6)
+      AddressFamilyROSE -> (#const AF_ROSE)
+      AddressFamilyDECnet -> (#const AF_DECnet)
+      AddressFamilyNETBEUI -> (#const AF_NETBEUI)
+      AddressFamilySecurity -> (#const AF_SECURITY)
+      AddressFamilyKey -> (#const AF_KEY)
+      AddressFamilyNetlink -> (#const AF_NETLINK)
+      AddressFamilyPacket -> (#const AF_PACKET)
+      AddressFamilyAsh -> (#const AF_ASH)
+      AddressFamilyEConet -> (#const AF_ECONET)
+      AddressFamilyATMSVC -> (#const AF_ATMSVC)
+      AddressFamilyRDS -> (#const AF_RDS)
+      AddressFamilySNA -> (#const AF_SNA)
+      AddressFamilyIRDA -> (#const AF_IRDA)
+      AddressFamilyPPPoX -> (#const AF_PPPOX)
+      AddressFamilywanpipe -> (#const AF_WANPIPE)
+      AddressFamilyLLC -> (#const AF_LLC)
+      AddressFamilyIB -> (#const AF_IB)
+      AddressFamilyMPLS -> (#const AF_MPLS)
+      AddressFamilyCAN -> (#const AF_CAN)
+      AddressFamilyTIPC -> (#const AF_TIPC)
+      AddressFamilyBluetooth -> (#const AF_BLUETOOTH)
+      AddressFamilyIUCV -> (#const AF_IUCV)
+      AddressFamilyRxRPC -> (#const AF_RXRPC)
+      AddressFamilyISDN -> (#const AF_ISDN)
+      AddressFamilyPhonet -> (#const AF_PHONET)
+      AddressFamilyIEEE802154 -> (#const AF_IEEE802154)
+      AddressFamilyCAIF -> (#const AF_CAIF)
+      AddressFamilyAlg -> (#const AF_ALG)
+      AddressFamilyNFC -> (#const AF_NFC)
+      AddressFamilyVSock -> (#const AF_VSOCK)
+      AddressFamilyKCM -> (#const AF_KCM)
+      AddressFamilyQIPCRTR -> (#const AF_QIPCRTR)
+      AddressFamilySMC -> (#const AF_SMC)
+      AddressFamilyXDP -> (#const AF_XDP)
+  toCInt (AddressFamilyUnknown unknown) = unknown
+  fromCInt af = case af of
+      (#const AF_UNSPEC) -> AddressFamilyKnown AddressFamilyUnspecified
+      (#const AF_UNIX) -> AddressFamilyKnown AddressFamilyUnix
+      (#const AF_INET) -> AddressFamilyKnown AddressFamilyInet
+      (#const AF_AX25) -> AddressFamilyKnown AddressFamilyAX25
+      (#const AF_IPX) -> AddressFamilyKnown AddressFamilyIPX
+      (#const AF_APPLETALK) -> AddressFamilyKnown AddressFamilyAppleTalk
+      (#const AF_NETROM) -> AddressFamilyKnown AddressFamilyNETROM
+      (#const AF_BRIDGE) -> AddressFamilyKnown AddressFamilyBridge
+      (#const AF_ATMPVC) -> AddressFamilyKnown AddressFamilyATMPVC
+      (#const AF_X25) -> AddressFamilyKnown AddressFamilyX25
+      (#const AF_INET6) -> AddressFamilyKnown AddressFamilyInet6
+      (#const AF_ROSE) -> AddressFamilyKnown AddressFamilyROSE
+      (#const AF_DECnet) -> AddressFamilyKnown AddressFamilyDECnet
+      (#const AF_NETBEUI) -> AddressFamilyKnown AddressFamilyNETBEUI
+      (#const AF_SECURITY) -> AddressFamilyKnown AddressFamilySecurity
+      (#const AF_KEY) -> AddressFamilyKnown AddressFamilyKey
+      (#const AF_NETLINK) -> AddressFamilyKnown AddressFamilyNetlink
+      (#const AF_PACKET) -> AddressFamilyKnown AddressFamilyPacket
+      (#const AF_ASH) -> AddressFamilyKnown AddressFamilyAsh
+      (#const AF_ECONET) -> AddressFamilyKnown AddressFamilyEConet
+      (#const AF_ATMSVC) -> AddressFamilyKnown AddressFamilyATMSVC
+      (#const AF_RDS) -> AddressFamilyKnown AddressFamilyRDS
+      (#const AF_SNA) -> AddressFamilyKnown AddressFamilySNA
+      (#const AF_IRDA) -> AddressFamilyKnown AddressFamilyIRDA
+      (#const AF_PPPOX) -> AddressFamilyKnown AddressFamilyPPPoX
+      (#const AF_WANPIPE) -> AddressFamilyKnown AddressFamilywanpipe
+      (#const AF_LLC) -> AddressFamilyKnown AddressFamilyLLC
+      (#const AF_IB) -> AddressFamilyKnown AddressFamilyIB
+      (#const AF_MPLS) -> AddressFamilyKnown AddressFamilyMPLS
+      (#const AF_CAN) -> AddressFamilyKnown AddressFamilyCAN
+      (#const AF_TIPC) -> AddressFamilyKnown AddressFamilyTIPC
+      (#const AF_BLUETOOTH) -> AddressFamilyKnown AddressFamilyBluetooth
+      (#const AF_IUCV) -> AddressFamilyKnown AddressFamilyIUCV
+      (#const AF_RXRPC) -> AddressFamilyKnown AddressFamilyRxRPC
+      (#const AF_ISDN) -> AddressFamilyKnown AddressFamilyISDN
+      (#const AF_PHONET) -> AddressFamilyKnown AddressFamilyPhonet
+      (#const AF_IEEE802154) -> AddressFamilyKnown AddressFamilyIEEE802154
+      (#const AF_CAIF) -> AddressFamilyKnown AddressFamilyCAIF
+      (#const AF_ALG) -> AddressFamilyKnown AddressFamilyAlg
+      (#const AF_NFC) -> AddressFamilyKnown AddressFamilyNFC
+      (#const AF_VSOCK) -> AddressFamilyKnown AddressFamilyVSock
+      (#const AF_KCM) -> AddressFamilyKnown AddressFamilyKCM
+      (#const AF_QIPCRTR) -> AddressFamilyKnown AddressFamilyQIPCRTR
+      (#const AF_SMC) -> AddressFamilyKnown AddressFamilySMC
+      (#const AF_XDP) -> AddressFamilyKnown AddressFamilyXDP
+      unknown -> AddressFamilyUnknown unknown
+
+instance ArgFormatting AddressFamily where
+  formatArg (AddressFamilyKnown family) =
+    FixedStringArg $ case family of
+      AddressFamilyUnspecified -> "AF_UNSPEC"
+      AddressFamilyUnix -> "AF_UNIX"
+      AddressFamilyInet -> "AF_INET"
+      AddressFamilyAX25 -> "AF_AX25"
+      AddressFamilyIPX -> "AF_IPX"
+      AddressFamilyAppleTalk -> "AF_APPLETALK"
+      AddressFamilyNETROM -> "AF_NETROM"
+      AddressFamilyBridge -> "AF_BRIDGE"
+      AddressFamilyATMPVC -> "AF_ATMPVC"
+      AddressFamilyX25 -> "AF_X25"
+      AddressFamilyInet6 -> "AF_INET6"
+      AddressFamilyROSE -> "AF_ROSE"
+      AddressFamilyDECnet -> "AF_ROSE"
+      AddressFamilyNETBEUI -> "AF_NETBEUI"
+      AddressFamilySecurity -> "AF_SECURITY"
+      AddressFamilyKey -> "AF_KEY"
+      AddressFamilyNetlink -> "AF_NETLINK"
+      AddressFamilyPacket -> "AF_PACKET"
+      AddressFamilyAsh -> "AF_ASH"
+      AddressFamilyEConet -> "AF_ECONET"
+      AddressFamilyATMSVC -> "AF_ATMSVC"
+      AddressFamilyRDS -> "AF_RDS"
+      AddressFamilySNA -> "AF_SNA"
+      AddressFamilyIRDA -> "AF_IRDA"
+      AddressFamilyPPPoX -> "AF_PPPOX"
+      AddressFamilywanpipe -> "AF_WANPIPE"
+      AddressFamilyLLC -> "AF_LLC"
+      AddressFamilyIB -> "AF_IB"
+      AddressFamilyMPLS -> "AF_MPLS"
+      AddressFamilyCAN -> "AF_CAN"
+      AddressFamilyTIPC -> "AF_TIPC"
+      AddressFamilyBluetooth -> "AF_BLUETOOTH"
+      AddressFamilyIUCV -> "AF_IUCV"
+      AddressFamilyRxRPC -> "AF_RXRPC"
+      AddressFamilyISDN -> "AF_ISDN"
+      AddressFamilyPhonet -> "AF_PHONET"
+      AddressFamilyIEEE802154 -> "AF_IEEE802154"
+      AddressFamilyCAIF -> "AF_CAIF"
+      AddressFamilyAlg -> "AF_ALG"
+      AddressFamilyNFC -> "AF_NFC"
+      AddressFamilyVSock -> "AF_VSOCK"
+      AddressFamilyKCM -> "AF_KCM"
+      AddressFamilyQIPCRTR -> "AF_QIPCRTR"
+      AddressFamilySMC -> "AF_SMC"
+      AddressFamilyXDP -> "AF_XDP"
+  formatArg (AddressFamilyUnknown unknown) =
+    IntegerArg (fromIntegral unknown)
+
+data SocketType
+  = SocketTypeKnown SocketDetails
+  | SocketTypeUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data SocketDetails =
+  SocketDetails
+    { sdType :: BaseSocketType
+    , sdNonBlock :: Bool
+    , sdCloExec :: Bool
+    }
+  deriving (Eq, Ord, Show)
+
+data BaseSocketType
+  = SocketStream
+  | SocketDgram
+  | SocketSeqPacket
+  | SocketRaw
+  | SocketRDM
+  | SocketPacket
+  deriving (Eq, Ord, Show)
+
+instance CIntRepresentable SocketType where
+  toCInt (SocketTypeKnown details) = baseType .|. nonBlock .|. cloExec
+    where
+      baseType = case sdType details of
+        SocketStream -> (#const SOCK_STREAM)
+        SocketDgram -> (#const SOCK_DGRAM)
+        SocketSeqPacket -> (#const SOCK_SEQPACKET)
+        SocketRaw -> (#const SOCK_RAW)
+        SocketRDM -> (#const SOCK_RDM)
+        SocketPacket -> (#const SOCK_PACKET)
+      nonBlock = if sdNonBlock details then (#const SOCK_NONBLOCK) else 0
+      cloExec = if sdCloExec details then (#const SOCK_CLOEXEC) else 0
+  toCInt (SocketTypeUnknown unknown) = unknown
+  fromCInt s
+    | s `hasSetBits` (#const SOCK_STREAM) = socketOfType SocketStream
+    | s `hasSetBits` (#const SOCK_DGRAM)  = socketOfType SocketDgram
+    | s `hasSetBits` (#const SOCK_SEQPACKET)  = socketOfType SocketSeqPacket
+    | s `hasSetBits` (#const SOCK_RAW)  = socketOfType SocketRaw
+    | s `hasSetBits` (#const SOCK_RDM)  = socketOfType SocketRDM
+    | s `hasSetBits` (#const SOCK_PACKET)  = socketOfType SocketPacket
+    | otherwise = SocketTypeUnknown s
+    where
+      socketOfType t = SocketTypeKnown $ SocketDetails t nonBlock cloExec
+      nonBlock = s `hasSetBits` (#const SOCK_NONBLOCK)
+      cloExec = s `hasSetBits` (#const SOCK_CLOEXEC)
+
+instance ArgFormatting SocketType where
+  formatArg (SocketTypeUnknown unknown) = IntegerArg (fromIntegral unknown)
+  formatArg (SocketTypeKnown SocketDetails{..}) =
+    FixedStringArg $ intercalate "|" (baseTypeStr ++ nonBlock ++ cloExec)
+    where
+      baseTypeStr = case sdType of
+          SocketStream    -> ["SOCK_STREAM"]
+          SocketDgram     -> ["SOCK_DGRAM"]
+          SocketSeqPacket -> ["SOCK_SEQPACKET"]
+          SocketRaw       -> ["SOCK_RAW"]
+          SocketRDM       -> ["SOCK_RDM"]
+          SocketPacket    -> ["SOCK_PACKET"]
+      nonBlock = if sdNonBlock then ["SOCK_NONBLOCK"] else []
+      cloExec = if sdCloExec then ["SOCK_CLOEXEC"] else []
+
 instance ArgFormatting TimespecStruct where
   formatArg TimespecStruct {..} =
     StructArg [("tv_sec", formatArg tv_sec), ("tv_nsec", formatArg tv_nsec)]
@@ -787,3 +1056,6 @@ instance ArgFormatting SigSet where
     where
       signalToStringArg =
         fmap (FixedStringArg . snd) . flip Data.Map.lookup signalMap
+
+hasSetBits :: CInt -> CInt -> Bool
+hasSetBits value mask = (value .&. mask) == mask

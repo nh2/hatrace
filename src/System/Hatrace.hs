@@ -1244,12 +1244,15 @@ data SyscallEnterDetails_socket = SyscallEnterDetails_socket
   { domain :: CInt
   , type_ :: CInt
   , protocol :: CInt
+  -- peeked details
+  , addressFamily :: AddressFamily
+  , socketType :: SocketType
   } deriving (Eq, Ord, Show)
 
 
 instance SyscallEnterFormatting SyscallEnterDetails_socket where
-  syscallEnterToFormatted SyscallEnterDetails_socket{ domain, type_, protocol } =
-    FormattedSyscall "socket" [ formatArg domain, formatArg type_, formatArg protocol ]
+  syscallEnterToFormatted SyscallEnterDetails_socket{ addressFamily, socketType, protocol } =
+    FormattedSyscall "socket" [ formatArg addressFamily, formatArg socketType, formatArg protocol ]
 
 
 data SyscallExitDetails_socket = SyscallExitDetails_socket
@@ -1431,13 +1434,16 @@ data SyscallEnterDetails_socketpair = SyscallEnterDetails_socketpair
   , type_ :: CInt
   , protocol :: CInt
   , sv :: Ptr CInt
+  -- peeked details
+  , addressFamily :: AddressFamily
+  , socketType :: SocketType
   } deriving (Eq, Ord, Show)
 
 
 instance SyscallEnterFormatting SyscallEnterDetails_socketpair where
-  syscallEnterToFormatted SyscallEnterDetails_socketpair{ domain, type_, protocol, sv } =
-    FormattedSyscall "socketpair" [ formatArg domain, formatArg type_, formatArg protocol
-                                  , formatPtrArg "int" sv ]
+  syscallEnterToFormatted SyscallEnterDetails_socketpair{ addressFamily, socketType, protocol, sv } =
+    FormattedSyscall "socketpair" [ formatArg addressFamily, formatArg socketType
+                                  , formatArg protocol, formatPtrArg "int" sv ]
 
 
 data SyscallExitDetails_socketpair = SyscallExitDetails_socketpair
@@ -1449,12 +1455,12 @@ data SyscallExitDetails_socketpair = SyscallExitDetails_socketpair
 
 instance SyscallExitFormatting SyscallExitDetails_socketpair where
   syscallExitToFormatted SyscallExitDetails_socketpair{ enterDetail, sockfd1, sockfd2 } =
-    ( FormattedSyscall "socketpair" [ formatArg domain, formatArg type_, formatArg protocol
-                                    , formatArg [sockfd1, sockfd2]
+    ( FormattedSyscall "socketpair" [ formatArg addressFamily, formatArg socketType
+                                    , formatArg protocol, formatArg [sockfd1, sockfd2]
                                     ]
     , NoReturn)
     where
-      SyscallEnterDetails_socketpair{ domain, type_, protocol } = enterDetail
+      SyscallEnterDetails_socketpair{ addressFamily, socketType, protocol } = enterDetail
 
 
 data DetailedSyscallEnter
@@ -1790,6 +1796,8 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { domain = fromIntegral domain
       , type_ = fromIntegral type_
       , protocol = fromIntegral protocol
+      , addressFamily = fromCInt (fromIntegral domain)
+      , socketType = fromCInt (fromIntegral type_)
       }
   Syscall_listen -> do
     let SyscallArgs{ arg0 = fd, arg1 = backlog } = syscallArgs
@@ -1869,6 +1877,8 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , type_ = fromIntegral type_
       , protocol = fromIntegral protocol
       , sv = svPtr
+      , addressFamily = fromCInt (fromIntegral domain)
+      , socketType = fromCInt (fromIntegral type_)
       }
   Syscall_munmap -> do
     let SyscallArgs{ arg0 = addr, arg1 = len } = syscallArgs
@@ -2310,7 +2320,6 @@ syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
     eDetailed <- liftIO $ getSyscallExitDetails knownSyscall syscallArgs pid
     yield (pid, mapLeft (syscall, ) eDetailed)
   _ -> return () -- skip
-
 
 foreign import ccall unsafe "string.h strerror" c_strerror :: CInt -> IO (Ptr CChar)
 
