@@ -519,6 +519,26 @@ spec = before_ assertNoChildren $ do
               ]
         renameToTmpFileEvents `shouldSatisfy` (not . null)
 
+    describe "symlink" $ do
+      it "seen exactly once for 'ln -s tempfile tempfilesymlink'" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        let symlinkPath = tmpFile ++ "symlink"
+        argv <- procToArgv "bash" ["-c", "ln -s " ++ tmpFile ++ " " ++ symlinkPath]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let symlinkEvents =
+              [ linkpathBS
+              | (_pid
+                , Right (DetailedSyscallExit_symlink
+                         SyscallExitDetails_symlink
+                         { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }})
+                ) <- events
+                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+              ]
+        length symlinkEvents `shouldBe` 1
+
     describe "pipe" $ do
       it "seen when piping output in bash" $ do
         argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
