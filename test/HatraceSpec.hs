@@ -86,12 +86,18 @@ spec = before_ assertNoChildren $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
       -- Disable core dumps for the test to not litter in the working tree.
       withCoredumpsDisabled $ do
-        -- Note: When we don't disable coredumps, the exit code is 139 instead.
-        -- 11 is certainly signal SIGSEGV, but I'm not sure what exactly the
-        -- added 128 indicate (is that how the kernel tells us whether or not
-        -- "core dumped" happened?).
+        -- Note: On some machines, the exit code is 11, on others it's 139 instead.
+        -- We haven't figured out yet what makes that difference.
+        -- 11 is certainly signal SIGSEGV, and usually 128+N indicates "killed by
+        -- signal N", but it's unclear why on some machine, the 128-bit isn't set.
+        -- In particular, I observe this difference even between my laptop and
+        -- my desktop, which run the same OS and same kernel version.
         -- See also https://github.com/nh2/hatrace/issues/4#issuecomment-475196313
-        traceForkProcess "example-programs-build/segfault" [] `shouldReturn` ExitFailure 11
+        -- For now, we just accept both results, but we should really figure out
+        -- what creates this difference.
+        exitCode <- traceForkProcess "example-programs-build/segfault" []
+        exitCode `shouldSatisfy` \x ->
+          x `elem` [ExitFailure 11, ExitFailure (128+11)]
 
   describe "sourceTraceForkExecvFullPathWithSink" $ do
 
