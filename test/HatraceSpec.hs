@@ -18,6 +18,8 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (eBADF)
+import           Foreign.Ptr (nullPtr, plusPtr)
+import           Foreign.Storable (sizeOf)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
@@ -572,3 +574,27 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         pathsLstatRequested `shouldSatisfy` ("/dev/null" `elem`)
+
+    describe "brk" $ do
+      it "has correct output after changing program break" $ do
+        let brkCall = "example-programs-build/brk-syscall"
+        callProcess "make" ["--quiet", brkCall]
+        argv <- procToArgv brkCall []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let brkCallAddresses =
+              [ (addr, brkResult)
+              | (_pid
+                , Right (DetailedSyscallExit_brk
+                         SyscallExitDetails_brk
+                         { enterDetail = SyscallEnterDetails_brk{ addr }, brkResult })
+                ) <- events
+              ]
+        brkCallAddresses `shouldSatisfy` ((3 <=) . length)
+        let (initArg, initAddr) = brkCallAddresses !! (length brkCallAddresses - 3)
+        let extAddr = plusPtr initAddr (0x80 * sizeOf initAddr)
+        initArg `shouldBe` nullPtr 
+        elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
+        elem (initAddr, initAddr) brkCallAddresses `shouldBe` True

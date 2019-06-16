@@ -59,6 +59,8 @@ module System.Hatrace
   , SyscallExitDetails_exit(..)
   , SyscallEnterDetails_exit_group(..)
   , SyscallExitDetails_exit_group(..)
+  , SyscallEnterDetails_brk(..)
+  , SyscallExitDetails_brk(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -630,6 +632,24 @@ data SyscallExitDetails_execve = SyscallExitDetails_execve
   } deriving (Eq, Ord, Show)
 
 
+data SyscallEnterDetails_brk = SyscallEnterDetails_brk
+  { addr :: Ptr Void
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_brk = SyscallExitDetails_brk
+  { enterDetail :: SyscallEnterDetails_brk
+  -- | From Linux Programmer's Manual:
+  -- On success, brk() returns zero. On error, -1 is returned, and errno
+  -- is set to ENOMEM. [...] However, the actual Linux system call returns the
+  -- new program break on success. On failure, the system call returns
+  -- the current break. The glibc wrapper function does some work (i.e.,
+  -- checks whether the new break is less than addr) to provide the 0 and
+  -- -1 return values described above.
+  , brkResult :: Ptr Void
+  } deriving (Eq, Ord, Show)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -651,6 +671,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_newfstatat SyscallEnterDetails_newfstatat
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
+  | DetailedSyscallEnter_brk SyscallEnterDetails_brk
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -676,6 +697,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_newfstatat SyscallExitDetails_newfstatat
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
+  | DetailedSyscallExit_brk SyscallExitDetails_brk
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -893,6 +915,10 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
   Syscall_exit_group -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit_group $ SyscallEnterDetails_exit_group { status = fromIntegral status }
+  Syscall_brk -> do
+    let SyscallArgs{ arg0 = addr } = syscallArgs
+    let addrPtr = word64ToPtr addr
+    pure $ DetailedSyscallEnter_brk $ SyscallEnterDetails_brk { addr = addrPtr }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1028,6 +1054,10 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
               enterDetail@SyscallEnterDetails_exit_group{} -> do
                 pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
 
+            DetailedSyscallEnter_brk
+              enterDetail@SyscallEnterDetails_brk{} -> do
+                pure $ DetailedSyscallExit_brk $ SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1141,6 +1171,10 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_exit_group{ status } ->
       "exit_group(" ++ show status ++ ")"
 
+  DetailedSyscallEnter_brk
+    SyscallEnterDetails_brk{ addr } ->
+      "brk(" ++ showPtrOrNull addr ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1150,6 +1184,12 @@ foreign import ccall unsafe "string.h strerror" c_strerror :: CInt -> IO (Ptr CC
 -- | Like "Foreign.C.Error"'s @errnoToIOError@, but getting only the string.
 strError :: ERRNO -> IO String
 strError (ERRNO errno) = c_strerror errno >>= peekCString
+
+
+showPtrOrNull :: Ptr a -> String
+showPtrOrNull p
+  | p == nullPtr = "NULL"
+  | otherwise    = show p
 
 
 formatDetailedSyscallExit :: DetailedSyscallExit -> String
@@ -1244,6 +1284,10 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_exit_group
     SyscallExitDetails_exit_group{ enterDetail = SyscallEnterDetails_exit_group{ status }} ->
       "exit_group(" ++ show status ++ ")"
+
+  DetailedSyscallExit_brk
+    SyscallExitDetails_brk{ enterDetail = SyscallEnterDetails_brk{ addr }, brkResult} ->
+      "brk(" ++ showPtrOrNull addr ++ ") = " ++ show brkResult
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
