@@ -636,7 +636,7 @@ data SyscallEnterDetails_mmap = SyscallEnterDetails_mmap
   { address :: Ptr Void
   , len :: CSize
   , prot :: MemoryProtectMode
-  , mmapFlags :: MMapMode
+  , flags :: MMapMode
   , fd :: Int
   , offset :: CSize
   } deriving (Eq, Ord, Show)
@@ -918,7 +918,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { address = addrPtr
       , len = fromIntegral len
       , prot = fromCInt $ fromIntegral prot
-      , mmapFlags = fromCInt $ fromIntegral flags
+      , flags = fromCInt $ fromIntegral flags
       , fd = fromIntegral fd
       , offset = fromIntegral offset
       }
@@ -1176,8 +1176,8 @@ formatDetailedSyscallEnter = \case
       "exit_group(" ++ show status ++ ")"
 
   DetailedSyscallEnter_mmap
-    SyscallEnterDetails_mmap{ address, len, prot, mmapFlags, fd, offset } ->
-      "mmap(" ++ show address ++ ", " ++ show len ++ ", " ++ hShow prot ++ ", " ++ hShow mmapFlags ++ ", " ++ show fd ++ ", " ++ show offset ++ ")"
+    SyscallEnterDetails_mmap{ address, len, prot, flags, fd, offset } ->
+      "mmap(" ++ show address ++ ", " ++ show len ++ ", " ++ hShow prot ++ ", " ++ hShow flags ++ ", " ++ show fd ++ ", " ++ show offset ++ ")"
 
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
@@ -1284,8 +1284,8 @@ formatDetailedSyscallExit = \case
       "exit_group(" ++ show status ++ ")"
 
   DetailedSyscallExit_mmap
-    SyscallExitDetails_mmap{ enterDetail = SyscallEnterDetails_mmap{ address, len, prot, mmapFlags, fd, offset }, mappedArea} ->
-      "mmap(" ++ show address ++ ", " ++ show len ++ ", " ++ hShow prot ++ ", " ++ hShow mmapFlags ++ ", " ++ show fd ++ ", " ++ show offset ++ ") = " ++ show mappedArea
+    SyscallExitDetails_mmap{ enterDetail = SyscallEnterDetails_mmap{ address, len, prot, flags, fd, offset }, mappedArea} ->
+      "mmap(" ++ show address ++ ", " ++ show len ++ ", " ++ hShow prot ++ ", " ++ hShow flags ++ ", " ++ show fd ++ ", " ++ show offset ++ ") = " ++ show mappedArea
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result

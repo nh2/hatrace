@@ -595,5 +595,5 @@ spec = before_ assertNoChildren $ do
         address lastArguments `shouldBe` nullPtr
         len lastArguments `shouldBe` fromIntegral (100 :: Int)
         hShow (prot lastArguments) `shouldBe` "PROT_READ"
-        hShow (mmapFlags lastArguments) `shouldBe` "MAP_SHARED|MAP_SHARED_VALIDATE"
+        hShow (flags (lastArguments :: SyscallEnterDetails_mmap)) `shouldBe` "MAP_SHARED"
         offset lastArguments `shouldBe` fromIntegral (0 :: Int)

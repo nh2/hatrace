@@ -126,42 +126,44 @@ data MMapMode
 
 instance HatraceShow MMapMode where
   hShow (MMapModeKnown mode) =
-    let granularModes = concat
-          [ if mapShared mode         then ["MAP_SHARED"]          else []
-          , if mapSharedValidate mode then ["MAP_SHARED_VALIDATE"] else []
-          , if mapPrivate mode        then ["MAP_PRIVATE"]         else []
-          , if map32Bit mode          then ["MAP_32BIT"]           else []
-          , if mapAnon mode           then ["MAP_ANON"]            else []
-          , if mapAnonymous mode      then ["MAP_ANONYMOUS"]       else []
-          , if mapDenyWrite mode      then ["MAP_DENYWRITE"]       else []
-          , if mapExecutable mode     then ["MAP_EXECUTABLE"]      else []
-          , if mapFile mode           then ["MAP_FILE"]            else []
-          , if mapFixed mode          then ["MAP_FIXED"]           else []
-          , if mapFixedNoreplace mode then ["MAP_FIXED_NOREPLACE"] else []
-          , if mapGrowsdown mode      then ["MAP_GROWSDOWN"]       else []
-          , if mapHugetlb mode        then ["MAP_HUGETLB"]         else []
+    let granularModes =
+          [ "MAP_SHARED"          | mapShared mode ] ++
+          [ "MAP_PRIVATE"         | mapPrivate mode ] ++
+          [ "MAP_32BIT"           | map32Bit mode ] ++
+          [ "MAP_ANON"            | mapAnon mode ] ++
+          [ "MAP_ANONYMOUS"       | mapAnonymous mode ] ++
+          [ "MAP_DENYWRITE"       | mapDenyWrite mode ] ++
+          [ "MAP_EXECUTABLE"      | mapExecutable mode ] ++
+          [ "MAP_FILE"            | mapFile mode ] ++
+          [ "MAP_FIXED"           | mapFixed mode ] ++
+#ifdef MAP_FIXED_NOREPLACE
+          [ "MAP_FIXED_NOREPLACE" | mapFixedNoreplace mode ] ++
+#endif
+          [ "MAP_GROWSDOWN"       | mapGrowsdown mode ] ++
+          [ "MAP_HUGETLB"         | mapHugetlb mode ] ++
 #ifdef MAP_HUGE_2MB
-          , if mapHuge2Mb mode        then ["MAP_HUGE_2MB"]        else []
+          [ "MAP_HUGE_2MB"        | mapHuge2Mb mode ] ++
 #endif
 #ifdef MAP_HUGE_1GB
-          , if mapHuge1Gb mode        then ["MAP_HUGE_1GB"]        else []
+          [ "MAP_HUGE_1GB"        | mapHuge1Gb mode ] ++
 #endif
-          , if mapLocked mode         then ["MAP_LOCKED"]          else []
-          , if mapNonblock mode       then ["MAP_NONBLOCK"]        else []
-          , if mapNoReserve mode      then ["MAP_NORESERVE"]       else []
-          , if mapPopulate mode       then ["MAP_POPULATE"]        else []
-          , if mapStack mode          then ["MAP_STACK"]           else []
-          , if mapSync mode           then ["MAP_SYNC"]            else []
+          [ "MAP_LOCKED"          | mapLocked mode ] ++
+          [ "MAP_NONBLOCK"        | mapNonblock mode ] ++
+          [ "MAP_NORESERVE"       | mapNoReserve mode ] ++
+          [ "MAP_POPULATE"        | mapPopulate mode ] ++
+          [ "MAP_STACK"           | mapStack mode ] ++
+#ifdef MAP_SYNC
+          [ "MAP_SYNC"            | mapSync mode ] ++
+#endif
 #ifdef MAP_UNINITIALIZED
-          , if mapUninitialized mode  then ["MAP_UNINITIALIZED"]   else []
+          [ "MAP_UNINITIALIZED"   | mapUninitialized mode ] ++
 #endif
-          ]
+          []
     in if null granularModes then "0" else intercalate "|" granularModes
   hShow (MMapModeUnknown x) = show x
 
 data GranularMMapMode = GranularMMapMode
   { mapShared :: Bool
-  , mapSharedValidate :: Bool
   , mapPrivate :: Bool
   , map32Bit :: Bool
   , mapAnon :: Bool
@@ -195,7 +197,6 @@ instance CIntRepresentable MMapMode where
     where
       setBits =
         [ if mapShared gp         then (#const MAP_SHARED)          else 0
-        , if mapSharedValidate gp then (#const MAP_SHARED_VALIDATE) else 0
         , if mapPrivate gp        then (#const MAP_PRIVATE)         else 0
         , if map32Bit gp          then (#const MAP_32BIT)           else 0
         , if mapAnon gp           then (#const MAP_ANON)            else 0
@@ -229,7 +230,6 @@ instance CIntRepresentable MMapMode where
                 let isset f = (m .&. f) /= zeroBits
                 in MMapModeKnown GranularMMapMode
                    { mapShared         = isset (#const MAP_SHARED)
-                   , mapSharedValidate = isset (#const MAP_SHARED_VALIDATE)
                    , mapPrivate        = isset (#const MAP_PRIVATE)
                    , map32Bit          = isset (#const MAP_32BIT)
                    , mapAnon           = isset (#const MAP_ANON)
@@ -260,7 +260,6 @@ instance CIntRepresentable MMapMode where
     where
         mapBits = foldr (.|.) (fromIntegral (0 :: Int)) $
           [ #const MAP_SHARED
-          , #const MAP_SHARED_VALIDATE
           , #const MAP_PRIVATE
           , #const MAP_32BIT
           , #const MAP_ANON
