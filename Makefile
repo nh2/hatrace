@@ -8,6 +8,7 @@ EXAMPLE_PROGRAMS += example-programs-build/execve-linux-null-envp
 EXAMPLE_PROGRAMS += example-programs-build/atomic-write
 EXAMPLE_PROGRAMS += example-programs-build/write-EBADF
 EXAMPLE_PROGRAMS += example-programs-build/access-itself
+EXAMPLE_PROGRAMS += example-programs-build/mmap-syscall
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
@@ -59,3 +60,7 @@ example-programs-build/write-EBADF: example-programs/write-EBADF.c
 example-programs-build/access-itself: example-programs/access-itself.c
 	mkdir -p example-programs-build
 	gcc -static -std=c99 -Wall -Werror example-programs/access-itself.c -o example-programs-build/access-itself
+
+example-programs-build/mmap-syscall: example-programs/mmap-syscall.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/mmap-syscall.c -o example-programs-build/mmap-syscall

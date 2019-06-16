@@ -18,6 +18,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (eBADF)
+import           Foreign.Ptr (nullPtr)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
@@ -26,6 +27,7 @@ import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
 import           System.Posix.Signals (sigTERM)
 import           System.Process (callProcess, readProcess)
+import           System.Hatrace.Types (hShow)
 import           Test.Hspec
 import           Text.Read (readMaybe)
 import           UnliftIO.Exception (bracket)
@@ -572,3 +574,26 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         pathsLstatRequested `shouldSatisfy` ("/dev/null" `elem`)
+
+    describe "mmap" $ do
+      it "sees the correct arguments" $ do
+        let mmapSyscall = "example-programs-build/mmap-syscall"
+        callProcess "make" ["--quiet", mmapSyscall]
+        argv <- procToArgv mmapSyscall []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let mmapArguments =
+              [ enterDetail (exitDetails :: SyscallExitDetails_mmap)
+              | (_pid
+                , Right (DetailedSyscallExit_mmap
+                         exitDetails)
+                ) <- events
+              ]
+        let lastArguments = last mmapArguments
+        address lastArguments `shouldBe` nullPtr
+        len lastArguments `shouldBe` fromIntegral (100 :: Int)
+        hShow (prot lastArguments) `shouldBe` "PROT_READ"
+        hShow (mmapFlags lastArguments) `shouldBe` "MAP_SHARED|MAP_SHARED_VALIDATE"
+        offset lastArguments `shouldBe` fromIntegral (0 :: Int)
