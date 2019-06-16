@@ -540,7 +540,7 @@ data SyscallEnterDetails_unlink = SyscallEnterDetails_unlink
 
 data SyscallExitDetails_unlink = SyscallExitDetails_unlink
   { enterDetail :: SyscallEnterDetails_unlink
-  , retval   :: CInt
+  , retval :: CInt
   } deriving (Eq, Ord, Show)
 
 data SyscallEnterDetails_access = SyscallEnterDetails_access
