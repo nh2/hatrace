@@ -25,6 +25,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/get-fs
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/set-tid-address
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sysinfo-loads
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mprotect
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/unlink
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
