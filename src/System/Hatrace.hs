@@ -62,6 +62,8 @@ module System.Hatrace
   , SyscallExitDetails_exit(..)
   , SyscallEnterDetails_exit_group(..)
   , SyscallExitDetails_exit_group(..)
+  , SyscallEnterDetails_mmap(..)
+  , SyscallExitDetails_mmap(..)
   , SyscallEnterDetails_symlink(..)
   , SyscallExitDetails_symlink(..)
   , SyscallEnterDetails_symlinkat(..)
@@ -1097,6 +1099,34 @@ instance SyscallExitFormatting SyscallExitDetails_pkey_mprotect where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
+data SyscallEnterDetails_mmap = SyscallEnterDetails_mmap
+  { addr :: Ptr Void
+  , len :: CSize
+  , prot :: MemoryProtectMode
+  , flags :: MMapMode
+  , fd :: CInt
+  , offset :: CSize
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallEnterFormatting SyscallEnterDetails_mmap where
+  syscallEnterToFormatted SyscallEnterDetails_mmap{ addr, len, prot, flags, fd, offset } =
+    FormattedSyscall "mmap" [ formatArg addr, formatArg len, formatArg prot
+                            , formatArg flags, formatArg fd, formatArg offset
+                            ]
+
+
+data SyscallExitDetails_mmap = SyscallExitDetails_mmap
+  { enterDetail :: SyscallEnterDetails_mmap
+  , mappedArea :: Ptr Void
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_mmap where
+  syscallExitToFormatted SyscallExitDetails_mmap{ enterDetail, mappedArea } =
+    ( syscallEnterToFormatted enterDetail
+    , formatReturn mappedArea)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1118,6 +1148,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_newfstatat SyscallEnterDetails_newfstatat
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
+  | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
   | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_time SyscallEnterDetails_time
@@ -1153,6 +1184,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_newfstatat SyscallExitDetails_newfstatat
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
+  | DetailedSyscallExit_mmap SyscallExitDetails_mmap
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
   | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_time SyscallExitDetails_time
@@ -1380,6 +1412,17 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
   Syscall_exit_group -> do
     let SyscallArgs{ arg0 = status } = syscallArgs
     pure $ DetailedSyscallEnter_exit_group $ SyscallEnterDetails_exit_group { status = fromIntegral status }
+  Syscall_mmap -> do
+    let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = prot, arg3 = flags, arg4 = fd, arg5 = offset } = syscallArgs
+    let addrPtr = word64ToPtr addr
+    pure $ DetailedSyscallEnter_mmap $ SyscallEnterDetails_mmap
+      { addr = addrPtr
+      , len = fromIntegral len
+      , prot = fromCInt $ fromIntegral prot
+      , flags = fromCInt $ fromIntegral flags
+      , fd = fromIntegral fd
+      , offset = fromIntegral offset
+      }
   Syscall_symlink -> do
     let SyscallArgs{ arg0 = targetAddr, arg1 = linkpathAddr } = syscallArgs
     let targetPtr = word64ToPtr targetAddr
@@ -1608,6 +1651,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
             DetailedSyscallEnter_exit_group
               enterDetail@SyscallEnterDetails_exit_group{} -> do
                 pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
+
+            DetailedSyscallEnter_mmap
+              enterDetail@SyscallEnterDetails_mmap{} -> do
+                pure $ DetailedSyscallExit_mmap $
+                    SyscallExitDetails_mmap{ enterDetail, mappedArea = word64ToPtr result }
 
             DetailedSyscallEnter_symlink
               enterDetail@SyscallEnterDetails_symlink{} -> do
@@ -2057,6 +2105,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_newfstatat details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_mmap details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_symlink details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_symlinkat details -> syscallEnterToFormatted details
@@ -2157,6 +2207,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_lstat details -> formatDetails details
 
     DetailedSyscallExit_newfstatat details -> formatDetails details
+
+    DetailedSyscallExit_mmap details -> formatDetails details
 
     DetailedSyscallExit_symlink details -> formatDetails details
 
