@@ -102,7 +102,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
-import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
+import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..), CUInt(..), CLLong(..), CUChar(..))
 import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
