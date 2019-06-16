@@ -103,20 +103,20 @@ data SockAddr
   deriving (Eq, Ord, Show)
 
 data UnixSockAddr = UnixSockAddr
-  { sun_family :: !CUShort -- ^ should be AF_UNIX
+  { sun_family :: !CUShort -- ^ should always be AF_UNIX
   , sun_path :: !BS.ByteString
   }
   deriving (Eq, Ord, Show)
 
 data InetSockAddr = InetSockAddr
-  { sin_family :: !CUShort -- ^ should be AF_INET
-  , sin_port :: !CUShort
-  , sin_addr :: !InetAddr
+  { sin_family :: !CUShort -- ^ should always be AF_INET
+  , sin_port :: !CUShort -- ^ port number
+  , sin_addr :: !InetAddr -- ^ IPv4 address
   }
   deriving (Eq, Ord, Show)
 
 data Inet6SockAddr = Inet6SockAddr
-  { sin6_family :: !CUShort -- ^ should be AF_INET6
+  { sin6_family :: !CUShort -- ^ should always be AF_INET6
   , sin6_port :: !CUShort -- ^ port number
   , sin6_flowinfo :: !CULong -- ^ IPv6 flow information
   , sin6_addr :: !Inet6Addr -- ^ IPv6 address
@@ -125,21 +125,21 @@ data Inet6SockAddr = Inet6SockAddr
   deriving (Eq, Ord, Show)
 
 data NetlinkSockAddr = NetlinkSockAddr
-  { nl_family :: !CUShort
-  , nl_pad :: !CUShort
-  , nl_pid :: !CInt
-  , nl_groups :: !CUInt
+  { nl_family :: !CUShort -- ^ should always be AF_NETLINK
+  , nl_pad :: !CUShort  -- ^ Should be Zero
+  , nl_pid :: !CInt -- ^ Port ID
+  , nl_groups :: !CUInt -- ^ Multicast groups mask
   }
   deriving (Eq, Ord, Show)
 
 data PacketSockAddr = PacketSockAddr
-  { sll_family :: !CUShort
-  , sll_protocol :: !CUShort
-  , sll_ifindex :: !Int
-  , sll_hatype :: !CUShort
-  , sll_pkttype :: !CUChar
-  , sll_halen :: !CUChar
-  , sll_addr :: !Word64
+  { sll_family :: !CUShort -- ^ should always be AF_PACKET
+  , sll_protocol :: !CUShort -- ^ Physical-layer protocol
+  , sll_ifindex :: !Int -- ^ Interface number
+  , sll_hatype :: !CUShort -- ^ ARP hardware type
+  , sll_pkttype :: !CUChar -- ^ Packet type
+  , sll_halen :: !CUChar -- ^ Length of address
+  , sll_addr :: !Word64 -- ^ Physical-layer address
   }
   deriving (Eq, Ord, Show)
 

@@ -583,4 +583,4 @@ spec = before_ assertNoChildren $ do
               nl_family sa `shouldBe` fromIntegral (afToInt AF_NETLINK)
             (AF_PACKET, SockAddrPacket sa) -> do
               sll_family sa `shouldBe` fromIntegral (afToInt AF_PACKET)
-            _ -> fail $ "Attribute family and code don't match. Expected: " ++ show (af code) ++ "(" ++ show code ++")"
+            _ -> fail $ "Attribute 'family' doesn't match. Expected: " ++ show (af code) ++ "(" ++ show code ++")"

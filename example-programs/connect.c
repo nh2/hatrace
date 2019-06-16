@@ -73,7 +73,7 @@ void connectUnix()
 
 void connectPacket()
 {
-
+	/* TODO: implement connect call for packet socket */
 }
 
 int main(int argc, char const *argv[])
