@@ -5,6 +5,7 @@ EXAMPLE_PROGRAMS :=
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-i386
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-i386-elf64
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-x86_64
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/symlinkat
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/segfault
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve-linux-null-envp
@@ -12,6 +13,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/atomic-write
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/write-EBADF
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/access-itself
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mmap-syscall
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/trigger-time
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)

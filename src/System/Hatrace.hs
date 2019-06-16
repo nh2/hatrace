@@ -61,6 +61,12 @@ module System.Hatrace
   , SyscallExitDetails_exit_group(..)
   , SyscallEnterDetails_mmap(..)
   , SyscallExitDetails_mmap(..)
+  , SyscallEnterDetails_symlink(..)
+  , SyscallExitDetails_symlink(..)
+  , SyscallEnterDetails_symlinkat(..)
+  , SyscallExitDetails_symlinkat(..)
+  , SyscallEnterDetails_time(..)
+  , SyscallExitDetails_time(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -104,7 +110,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Word (Word32, Word64)
 import           Foreign.C.Error (Errno(..), throwErrnoIfMinus1, throwErrnoIfMinus1_, getErrno, resetErrno, eCHILD, eINVAL)
 import           Foreign.C.String (peekCString)
-import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..))
+import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CSize(..), CTime(..))
 import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
@@ -116,7 +122,7 @@ import           System.Directory (canonicalizePath, doesFileExist, findExecutab
 import           System.Exit (ExitCode(..), die)
 import           System.FilePath ((</>))
 import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
-import           System.Linux.Ptrace (TracedProcess(..), peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
+import           System.Linux.Ptrace (TracedProcess(..), peek, peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
 import qualified System.Linux.Ptrace as Ptrace
 import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
 import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
@@ -631,6 +637,43 @@ data SyscallExitDetails_execve = SyscallExitDetails_execve
   , execveResult :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_symlink = SyscallEnterDetails_symlink
+  { target :: Ptr CChar
+  , linkpath :: Ptr CChar
+  -- Peeked details
+  , targetBS :: ByteString
+  , linkpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_symlink = SyscallExitDetails_symlink
+  { enterDetail :: SyscallEnterDetails_symlink
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_symlinkat = SyscallEnterDetails_symlinkat
+  { dirfd :: CInt
+  , target :: Ptr CChar
+  , linkpath :: Ptr CChar
+  -- Peeked details
+  , targetBS :: ByteString
+  , linkpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_symlinkat = SyscallExitDetails_symlinkat
+  { enterDetail :: SyscallEnterDetails_symlinkat
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_time = SyscallEnterDetails_time
+  { tloc :: Ptr CTime
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_time = SyscallExitDetails_time
+  { enterDetail :: SyscallEnterDetails_time
+  , timeResult :: CTime
+  -- Peeked details
+  , tlocValue :: Maybe CTime
+  } deriving (Eq, Ord, Show)
+
 
 data SyscallEnterDetails_mmap = SyscallEnterDetails_mmap
   { address :: Ptr Void
@@ -668,6 +711,9 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
+  | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
+  | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
+  | DetailedSyscallEnter_time SyscallEnterDetails_time
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -694,6 +740,9 @@ data DetailedSyscallExit
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_mmap SyscallExitDetails_mmap
+  | DetailedSyscallExit_symlink SyscallExitDetails_symlink
+  | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
+  | DetailedSyscallExit_time SyscallExitDetails_time
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -922,6 +971,37 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , fd = fromIntegral fd
       , offset = fromIntegral offset
       }
+  Syscall_symlink -> do
+    let SyscallArgs{ arg0 = targetAddr, arg1 = linkpathAddr } = syscallArgs
+    let targetPtr = word64ToPtr targetAddr
+    let linkpathPtr = word64ToPtr linkpathAddr
+    targetBS <- peekNullTerminatedBytes proc targetPtr
+    linkpathBS <- peekNullTerminatedBytes proc linkpathPtr
+    pure $ DetailedSyscallEnter_symlink $ SyscallEnterDetails_symlink
+      { target = targetPtr
+      , linkpath = linkpathPtr
+      , targetBS
+      , linkpathBS
+      }
+  Syscall_symlinkat -> do
+    let SyscallArgs{ arg0 = targetAddr, arg1 = fddir, arg2 = linkpathAddr } = syscallArgs
+    let targetPtr = word64ToPtr targetAddr
+    let linkpathPtr = word64ToPtr linkpathAddr
+    targetBS <- peekNullTerminatedBytes proc targetPtr
+    linkpathBS <- peekNullTerminatedBytes proc linkpathPtr
+    pure $ DetailedSyscallEnter_symlinkat $ SyscallEnterDetails_symlinkat
+      { target = targetPtr
+      , dirfd = fromIntegral fddir
+      , linkpath = linkpathPtr
+      , targetBS
+      , linkpathBS
+      }
+  Syscall_time -> do
+    let SyscallArgs{ arg0 = tlocAddr } = syscallArgs
+    let tlocPtr = word64ToPtr tlocAddr
+    pure $ DetailedSyscallEnter_time $ SyscallEnterDetails_time
+      { tloc = tlocPtr
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1062,6 +1142,28 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_mmap $
                     SyscallExitDetails_mmap{ enterDetail, mappedArea = word64ToPtr result }
 
+            DetailedSyscallEnter_symlink
+              enterDetail@SyscallEnterDetails_symlink{} -> do
+                pure $ DetailedSyscallExit_symlink $
+                  SyscallExitDetails_symlink{ enterDetail }
+
+            DetailedSyscallEnter_symlinkat
+              enterDetail@SyscallEnterDetails_symlinkat{} -> do
+                pure $ DetailedSyscallExit_symlinkat $
+                  SyscallExitDetails_symlinkat{ enterDetail }
+
+            DetailedSyscallEnter_time
+              enterDetail@SyscallEnterDetails_time{tloc} -> do
+                tlocValue <- if tloc == nullPtr
+                             then pure Nothing
+                             else Just <$> peek (TracedProcess pid) tloc
+                pure $ DetailedSyscallExit_time $
+                  SyscallExitDetails_time
+                    { enterDetail
+                    , timeResult = fromIntegral result
+                    , tlocValue
+                    }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1179,6 +1281,18 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_mmap{ address, len, prot, flags, fd, offset } ->
       "mmap(" ++ show address ++ ", " ++ show len ++ ", " ++ hShow prot ++ ", " ++ hShow flags ++ ", " ++ show fd ++ ", " ++ show offset ++ ")"
 
+  DetailedSyscallEnter_symlink
+    SyscallEnterDetails_symlink{ targetBS, linkpathBS } ->
+      "symlink(" ++ show targetBS ++ ", " ++ show linkpathBS ++ ")"
+
+  DetailedSyscallEnter_symlinkat
+    SyscallEnterDetails_symlinkat{ targetBS, dirfd, linkpathBS } ->
+      "symlinkat(" ++ show targetBS ++ ", " ++ show dirfd ++ ", " ++ show linkpathBS ++ ")"
+
+  DetailedSyscallEnter_time
+    SyscallEnterDetails_time{ tloc } ->
+      "time(" ++ show tloc ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1286,6 +1400,21 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_mmap
     SyscallExitDetails_mmap{ enterDetail = SyscallEnterDetails_mmap{ address, len, prot, flags, fd, offset }, mappedArea} ->
       "mmap(" ++ show address ++ ", " ++ show len ++ ", " ++ hShow prot ++ ", " ++ hShow flags ++ ", " ++ show fd ++ ", " ++ show offset ++ ") = " ++ show mappedArea
+
+  DetailedSyscallExit_symlink
+    SyscallExitDetails_symlink{ enterDetail = SyscallEnterDetails_symlink{ targetBS, linkpathBS }} ->
+      "symlink(" ++ show targetBS ++ ", " ++ show linkpathBS ++ ")"
+
+  DetailedSyscallExit_symlinkat
+    SyscallExitDetails_symlinkat{ enterDetail = SyscallEnterDetails_symlinkat{ targetBS, dirfd, linkpathBS }} ->
+      "symlinkat(" ++ show targetBS ++ ", " ++ show dirfd ++ ", " ++ show linkpathBS ++ ")"
+
+  DetailedSyscallExit_time
+    SyscallExitDetails_time{ enterDetail = SyscallEnterDetails_time { tloc }
+                           , timeResult
+                           , tlocValue
+                           } ->
+      "time(" ++ show tloc ++ " /* " ++ show tlocValue ++ " */) = " ++ show timeResult
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
