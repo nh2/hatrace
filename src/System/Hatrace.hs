@@ -45,6 +45,8 @@ module System.Hatrace
   , SyscallExitDetails_renameat(..)
   , SyscallEnterDetails_renameat2(..)
   , SyscallExitDetails_renameat2(..)
+  , SyscallEnterDetails_unlink(..)
+  , SyscallExitDetails_unlink(..)
   , SyscallEnterDetails_stat(..)
   , SyscallExitDetails_stat(..)
   , SyscallEnterDetails_fstat(..)
@@ -530,6 +532,16 @@ data SyscallExitDetails_renameat2 = SyscallExitDetails_renameat2
   { enterDetail :: SyscallEnterDetails_renameat2
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_unlink = SyscallEnterDetails_unlink
+  { pathname :: Ptr CChar
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_unlink = SyscallExitDetails_unlink
+  { enterDetail :: SyscallEnterDetails_unlink
+  , retval   :: CInt
+  } deriving (Eq, Ord, Show)
 
 data SyscallEnterDetails_access = SyscallEnterDetails_access
   { pathname :: Ptr CChar
@@ -708,6 +720,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_rename SyscallEnterDetails_rename
   | DetailedSyscallEnter_renameat SyscallEnterDetails_renameat
   | DetailedSyscallEnter_renameat2 SyscallEnterDetails_renameat2
+  | DetailedSyscallEnter_unlink SyscallEnterDetails_unlink
   | DetailedSyscallEnter_stat SyscallEnterDetails_stat
   | DetailedSyscallEnter_fstat SyscallEnterDetails_fstat
   | DetailedSyscallEnter_lstat SyscallEnterDetails_lstat
@@ -737,6 +750,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_rename SyscallExitDetails_rename
   | DetailedSyscallExit_renameat SyscallExitDetails_renameat
   | DetailedSyscallExit_renameat2 SyscallExitDetails_renameat2
+  | DetailedSyscallExit_unlink SyscallExitDetails_unlink
   | DetailedSyscallExit_stat SyscallExitDetails_stat
   | DetailedSyscallExit_fstat SyscallExitDetails_fstat
   | DetailedSyscallExit_lstat SyscallExitDetails_lstat
@@ -905,7 +919,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       }
   Syscall_renameat2 -> do
     let SyscallArgs{ arg0 = olddirfd, arg1 = oldpathAddr
-                   , arg2 =newdirfd, arg3 = newpathAddr, arg4 = flags } = syscallArgs
+                   , arg2 = newdirfd, arg3 = newpathAddr, arg4 = flags } = syscallArgs
     let oldpathPtr = word64ToPtr oldpathAddr
     let newpathPtr = word64ToPtr newpathAddr
     oldpathBS <- peekNullTerminatedBytes proc oldpathPtr
@@ -918,6 +932,14 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , oldpathBS
       , newpathBS
       , flags = fromIntegral flags
+      }
+  Syscall_unlink -> do
+    let SyscallArgs{ arg0 = pathname } = syscallArgs
+        pathnamePtr = word64ToPtr pathname
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_unlink $ SyscallEnterDetails_unlink
+      { pathname = pathnamePtr
+      , pathnameBS
       }
   Syscall_stat -> do
     let SyscallArgs{ arg0 = pathnameAddr, arg1 = statbufAddr } = syscallArgs
@@ -1102,6 +1124,11 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                 pure $ DetailedSyscallExit_renameat2 $
                   SyscallExitDetails_renameat2{ enterDetail }
 
+            DetailedSyscallEnter_unlink
+              enterDetail@SyscallEnterDetails_unlink{} -> do
+                pure $ DetailedSyscallExit_unlink $
+                  SyscallExitDetails_unlink { enterDetail, retval = fromIntegral result }
+
             DetailedSyscallEnter_stat
               enterDetail@SyscallEnterDetails_stat{statbuf} -> do
                 stat <- Ptrace.peek (TracedProcess pid) statbuf
@@ -1244,6 +1271,10 @@ formatDetailedSyscallEnter = \case
       "renameat2(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
                  ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ", " ++ show flags ++ ")"
 
+  DetailedSyscallEnter_unlink
+    SyscallEnterDetails_unlink { pathnameBS } ->
+      "unlink(" ++ show pathnameBS ++ ")"
+
   DetailedSyscallEnter_stat
     SyscallEnterDetails_stat{ pathnameBS } ->
       "stat(" ++ show pathnameBS ++ ", struct stat *statbuf)"
@@ -1363,6 +1394,10 @@ formatDetailedSyscallExit = \case
     { enterDetail = SyscallEnterDetails_renameat2{ olddirfd, oldpathBS, newdirfd, newpathBS, flags } } ->
       "renameat2(" ++ show olddirfd ++ ", " ++ show oldpathBS ++
                  ", " ++ show newdirfd ++ ", " ++ show newpathBS ++ ", " ++ show flags ++ ")"
+
+  DetailedSyscallExit_unlink
+    SyscallExitDetails_unlink { enterDetail = SyscallEnterDetails_unlink{ pathnameBS }, retval } ->
+      "unlink(" ++ show pathnameBS ++ ") = " ++ show retval
 
   DetailedSyscallExit_stat
     SyscallExitDetails_stat{ enterDetail = SyscallEnterDetails_stat{ pathnameBS }, stat } ->
