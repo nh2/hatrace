@@ -40,3 +40,4 @@ So in general to add a new syscall `foo` to `hatrace` one needs to do the follow
     2. Add an entry for it the type `DetailedSyscallExit` sum type.
     3. Update `getSyscallExitDetails` accordingly.
     4. Update `formatDetailedSyscallExit` accordingly.
+3. (Optional but highly recommended) Add test(s) for the implemented syscall - see `HatraceSpec` for examples

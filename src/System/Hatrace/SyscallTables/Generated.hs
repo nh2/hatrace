@@ -4,10 +4,12 @@
 
 module System.Hatrace.SyscallTables.Generated where
 
+import           Control.Monad (when)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Language.Haskell.TH
 import           Data.Word (Word32, Word64)
+import           System.Directory (doesFileExist)
 
 import           System.Hatrace.SyscallTables (readSyscallTable)
 import           System.Hatrace.SyscallTables.Util (mkSyscallName)
@@ -15,7 +17,12 @@ import           System.Hatrace.SyscallTables.Util (mkSyscallName)
 
 $(do
   -- We use the x86_64 table to extract the names for the data type.
-  table <- runIO $ readSyscallTable "syscalls-table/tables/syscalls-x86_64"
+  table <- runIO $ do
+    let file = "syscalls-table/tables/syscalls-x86_64"
+    exists <- doesFileExist file
+    when (not exists) $ do
+      error $ "File " ++ file ++ " does not exist; did you forget to clone the submodule?"
+    readSyscallTable file
 
   -- Generates `data KnownSyscall = Syscall_Read | Syscall_Write | ...`
   let constructors =

@@ -61,6 +61,10 @@ module System.Hatrace
   , SyscallExitDetails_exit_group(..)
   , SyscallEnterDetails_brk(..)
   , SyscallExitDetails_brk(..)
+  , SyscallEnterDetails_symlink(..)
+  , SyscallExitDetails_symlink(..)
+  , SyscallEnterDetails_symlinkat(..)
+  , SyscallExitDetails_symlinkat(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -631,6 +635,30 @@ data SyscallExitDetails_execve = SyscallExitDetails_execve
   , execveResult :: CInt
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_symlink = SyscallEnterDetails_symlink
+  { target :: Ptr CChar
+  , linkpath :: Ptr CChar
+  -- Peeked details
+  , targetBS :: ByteString
+  , linkpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_symlink = SyscallExitDetails_symlink
+  { enterDetail :: SyscallEnterDetails_symlink
+  } deriving (Eq, Ord, Show)
+
+data SyscallEnterDetails_symlinkat = SyscallEnterDetails_symlinkat
+  { dirfd :: CInt
+  , target :: Ptr CChar
+  , linkpath :: Ptr CChar
+  -- Peeked details
+  , targetBS :: ByteString
+  , linkpathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+data SyscallExitDetails_symlinkat = SyscallExitDetails_symlinkat
+  { enterDetail :: SyscallEnterDetails_symlinkat
+  } deriving (Eq, Ord, Show)
 
 data SyscallEnterDetails_brk = SyscallEnterDetails_brk
   { addr :: Ptr Void
@@ -672,6 +700,8 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_brk SyscallEnterDetails_brk
+  | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
+  | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -698,6 +728,8 @@ data DetailedSyscallExit
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_brk SyscallExitDetails_brk
+  | DetailedSyscallExit_symlink SyscallExitDetails_symlink
+  | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -919,6 +951,31 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let SyscallArgs{ arg0 = addr } = syscallArgs
     let addrPtr = word64ToPtr addr
     pure $ DetailedSyscallEnter_brk $ SyscallEnterDetails_brk { addr = addrPtr }
+  Syscall_symlink -> do
+    let SyscallArgs{ arg0 = targetAddr, arg1 = linkpathAddr } = syscallArgs
+    let targetPtr = word64ToPtr targetAddr
+    let linkpathPtr = word64ToPtr linkpathAddr
+    targetBS <- peekNullTerminatedBytes proc targetPtr
+    linkpathBS <- peekNullTerminatedBytes proc linkpathPtr
+    pure $ DetailedSyscallEnter_symlink $ SyscallEnterDetails_symlink
+      { target = targetPtr
+      , linkpath = linkpathPtr
+      , targetBS
+      , linkpathBS
+      }
+  Syscall_symlinkat -> do
+    let SyscallArgs{ arg0 = targetAddr, arg1 = fddir, arg2 = linkpathAddr } = syscallArgs
+    let targetPtr = word64ToPtr targetAddr
+    let linkpathPtr = word64ToPtr linkpathAddr
+    targetBS <- peekNullTerminatedBytes proc targetPtr
+    linkpathBS <- peekNullTerminatedBytes proc linkpathPtr
+    pure $ DetailedSyscallEnter_symlinkat $ SyscallEnterDetails_symlinkat
+      { target = targetPtr
+      , dirfd = fromIntegral fddir
+      , linkpath = linkpathPtr
+      , targetBS
+      , linkpathBS
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1058,6 +1115,16 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
               enterDetail@SyscallEnterDetails_brk{} -> do
                 pure $ DetailedSyscallExit_brk $ SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
 
+            DetailedSyscallEnter_symlink
+              enterDetail@SyscallEnterDetails_symlink{} -> do
+                pure $ DetailedSyscallExit_symlink $
+                  SyscallExitDetails_symlink{ enterDetail }
+
+            DetailedSyscallEnter_symlinkat
+              enterDetail@SyscallEnterDetails_symlinkat{} -> do
+                pure $ DetailedSyscallExit_symlinkat $
+                  SyscallExitDetails_symlinkat{ enterDetail }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
@@ -1175,6 +1242,14 @@ formatDetailedSyscallEnter = \case
     SyscallEnterDetails_brk{ addr } ->
       "brk(" ++ showPtrOrNull addr ++ ")"
 
+  DetailedSyscallEnter_symlink
+    SyscallEnterDetails_symlink{ targetBS, linkpathBS } ->
+      "symlink(" ++ show targetBS ++ ", " ++ show linkpathBS ++ ")"
+
+  DetailedSyscallEnter_symlinkat
+    SyscallEnterDetails_symlinkat{ targetBS, dirfd, linkpathBS } ->
+      "symlinkat(" ++ show targetBS ++ ", " ++ show dirfd ++ ", " ++ show linkpathBS ++ ")"
+
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
 
@@ -1288,6 +1363,14 @@ formatDetailedSyscallExit = \case
   DetailedSyscallExit_brk
     SyscallExitDetails_brk{ enterDetail = SyscallEnterDetails_brk{ addr }, brkResult} ->
       "brk(" ++ showPtrOrNull addr ++ ") = " ++ show brkResult
+
+  DetailedSyscallExit_symlink
+    SyscallExitDetails_symlink{ enterDetail = SyscallEnterDetails_symlink{ targetBS, linkpathBS }} ->
+      "symlink(" ++ show targetBS ++ ", " ++ show linkpathBS ++ ")"
+
+  DetailedSyscallExit_symlinkat
+    SyscallExitDetails_symlinkat{ enterDetail = SyscallEnterDetails_symlinkat{ targetBS, dirfd, linkpathBS }} ->
+      "symlinkat(" ++ show targetBS ++ ", " ++ show dirfd ++ ", " ++ show linkpathBS ++ ")"
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
