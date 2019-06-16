@@ -48,6 +48,8 @@ module System.Hatrace
   , SyscallExitDetails_renameat(..)
   , SyscallEnterDetails_renameat2(..)
   , SyscallExitDetails_renameat2(..)
+  , SyscallEnterDetails_unlink(..)
+  , SyscallExitDetails_unlink(..)
   , SyscallEnterDetails_stat(..)
   , SyscallExitDetails_stat(..)
   , SyscallEnterDetails_fstat(..)
@@ -682,6 +684,26 @@ instance SyscallExitFormatting SyscallExitDetails_renameat2 where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
+data SyscallEnterDetails_unlink = SyscallEnterDetails_unlink
+  { pathname :: Ptr CChar
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_unlink where
+  syscallEnterToFormatted SyscallEnterDetails_unlink{ pathnameBS } =
+    FormattedSyscall "unlink" [formatArg pathnameBS]
+
+
+data SyscallExitDetails_unlink = SyscallExitDetails_unlink
+  { enterDetail :: SyscallEnterDetails_unlink
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_unlink where
+  syscallExitToFormatted SyscallExitDetails_unlink{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 data SyscallEnterDetails_access = SyscallEnterDetails_access
   { pathname :: Ptr CChar
   , mode :: CInt
@@ -1171,6 +1193,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_rename SyscallEnterDetails_rename
   | DetailedSyscallEnter_renameat SyscallEnterDetails_renameat
   | DetailedSyscallEnter_renameat2 SyscallEnterDetails_renameat2
+  | DetailedSyscallEnter_unlink SyscallEnterDetails_unlink
   | DetailedSyscallEnter_stat SyscallEnterDetails_stat
   | DetailedSyscallEnter_fstat SyscallEnterDetails_fstat
   | DetailedSyscallEnter_lstat SyscallEnterDetails_lstat
@@ -1208,6 +1231,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_rename SyscallExitDetails_rename
   | DetailedSyscallExit_renameat SyscallExitDetails_renameat
   | DetailedSyscallExit_renameat2 SyscallExitDetails_renameat2
+  | DetailedSyscallExit_unlink SyscallExitDetails_unlink
   | DetailedSyscallExit_stat SyscallExitDetails_stat
   | DetailedSyscallExit_fstat SyscallExitDetails_fstat
   | DetailedSyscallExit_lstat SyscallExitDetails_lstat
@@ -1384,7 +1408,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       }
   Syscall_renameat2 -> do
     let SyscallArgs{ arg0 = olddirfd, arg1 = oldpathAddr
-                   , arg2 =newdirfd, arg3 = newpathAddr, arg4 = flags } = syscallArgs
+                   , arg2 = newdirfd, arg3 = newpathAddr, arg4 = flags } = syscallArgs
     let oldpathPtr = word64ToPtr oldpathAddr
     let newpathPtr = word64ToPtr newpathAddr
     oldpathBS <- peekNullTerminatedBytes proc oldpathPtr
@@ -1397,6 +1421,14 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , oldpathBS
       , newpathBS
       , flags = fromIntegral flags
+      }
+  Syscall_unlink -> do
+    let SyscallArgs{ arg0 = pathname } = syscallArgs
+        pathnamePtr = word64ToPtr pathname
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_unlink $ SyscallEnterDetails_unlink
+      { pathname = pathnamePtr
+      , pathnameBS
       }
   Syscall_stat -> do
     let SyscallArgs{ arg0 = pathnameAddr, arg1 = statbufAddr } = syscallArgs
@@ -1678,6 +1710,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
               enterDetail@SyscallEnterDetails_renameat2{} -> do
                 pure $ DetailedSyscallExit_renameat2 $
                   SyscallExitDetails_renameat2{ enterDetail }
+
+            DetailedSyscallEnter_unlink
+              enterDetail@SyscallEnterDetails_unlink{} -> do
+                pure $ DetailedSyscallExit_unlink $
+                  SyscallExitDetails_unlink { enterDetail }
 
             DetailedSyscallEnter_stat
               enterDetail@SyscallEnterDetails_stat{statbuf} -> do
@@ -2204,6 +2241,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_ppoll details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_unlink details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2308,6 +2347,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_poll details -> formatDetails details
 
     DetailedSyscallExit_ppoll details -> formatDetails details
+
+    DetailedSyscallExit_unlink details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
