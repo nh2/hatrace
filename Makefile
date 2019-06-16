@@ -13,6 +13,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve-linux-null-envp
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/atomic-write
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/write-EBADF
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/change-write-result
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mmap-syscall
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/access-itself
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/trigger-time
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/get-fs
@@ -54,3 +55,8 @@ $(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.asm
 $(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.c
 	mkdir -p $(EXAMPLE_DST)
 	gcc -static -std=c99 -Wall -Werror $< -o $@
+
+
+example-programs-build/mmap-syscall: example-programs/mmap-syscall.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror example-programs/mmap-syscall.c -o example-programs-build/mmap-syscall
