@@ -7,6 +7,8 @@ module System.Hatrace.Types
   ( FileAccessMode(..)
   , GranularAccessMode(..)
   , fileExistence
+  , SocketMsgFlag(..)
+  , GranularSocketMsgFlag(..)
   , StatStruct(..)
   , TimespecStruct(..)
   , CIntRepresentable(..)
@@ -211,3 +213,132 @@ shutdownTypeName how = case how of
   (#const SHUT_WR) -> "SHUT_WR"
   (#const SHUT_RDWR) -> "SHUT_RDWR"
   _ -> "SHUT_" ++ show how
+
+data SocketMsgFlag = SocketMsgFlag GranularSocketMsgFlag deriving (Eq, Ord, Show)
+
+data GranularSocketMsgFlag = GranularSocketMsgFlag
+  { socketMsgFlagOOB :: Bool
+  , socketMsgFlagPEEK :: Bool
+  , socketMsgFlagDONTROUTE :: Bool
+  , socketMsgFlagCTRUNC :: Bool
+  , socketMsgFlagPROXY :: Bool
+  , socketMsgFlagTRUNC :: Bool
+  , socketMsgFlagDONTWAIT :: Bool
+  , socketMsgFlagEOR :: Bool
+  , socketMsgFlagWAITALL :: Bool
+  , socketMsgFlagFIN :: Bool
+  , socketMsgFlagSYN :: Bool
+  , socketMsgFlagCONFIRM :: Bool
+  , socketMsgFlagRST :: Bool
+  , socketMsgFlagERRQUEUE :: Bool
+  , socketMsgFlagNOSIGNAL :: Bool
+  , socketMsgFlagMORE :: Bool
+  , socketMsgFlagWAITFORONE :: Bool
+  , socketMsgFlagBATCH :: Bool
+  , socketMsgFlagZEROCOPY :: Bool
+  , socketMsgFlagFASTOPEN :: Bool
+  , socketMsgFlagCMSG_CLOEXEC :: Bool
+  , socketMsgFlagUnknown :: CUInt
+  } deriving (Eq, Ord, Show)
+
+instance HatraceShow SocketMsgFlag where
+  hShow (SocketMsgFlag flags) = let modes = concat
+                                      [ if socketMsgFlagOOB flags then ["MSG_OOB"] else []
+                                      , if socketMsgFlagPEEK flags then ["MSG_PEEK"] else []
+                                      , if socketMsgFlagDONTROUTE flags then ["MSG_DONTROUTE"] else []
+                                      , if socketMsgFlagCTRUNC flags then ["MSG_CTRUNC"] else []
+                                      , if socketMsgFlagPROXY flags then ["MSG_PROXY"] else []
+                                      , if socketMsgFlagTRUNC flags then ["MSG_TRUNC"] else []
+                                      , if socketMsgFlagDONTWAIT flags then ["MSG_DONTWAIT"] else []
+                                      , if socketMsgFlagEOR flags then ["MSG_EOR"] else []
+                                      , if socketMsgFlagWAITALL flags then ["MSG_WAITALL"] else []
+                                      , if socketMsgFlagFIN flags then ["MSG_FIN"] else []
+                                      , if socketMsgFlagSYN flags then ["MSG_SYN"] else []
+                                      , if socketMsgFlagCONFIRM flags then ["MSG_CONFIRM"] else []
+                                      , if socketMsgFlagRST flags then ["MSG_RST"] else []
+                                      , if socketMsgFlagERRQUEUE flags then ["MSG_ERRQUEUE"] else []
+                                      , if socketMsgFlagNOSIGNAL flags then ["MSG_NOSIGNAL"] else []
+                                      , if socketMsgFlagMORE flags then ["MSG_MORE"] else []
+                                      , if socketMsgFlagWAITFORONE flags then ["MSG_WAITFORONE"] else []
+                                      , if socketMsgFlagBATCH flags then ["MSG_BATCH"] else []
+                                      , if socketMsgFlagZEROCOPY flags then ["MSG_ZEROCOPY"] else []
+                                      , if socketMsgFlagFASTOPEN flags then ["MSG_FASTOPEN"] else []
+                                      , if socketMsgFlagCMSG_CLOEXEC flags then ["MSG_CMSG_CLOEXEC"] else []
+                                      , if socketMsgFlagUnknown flags /= 0 then [show $ socketMsgFlagUnknown flags] else []
+                                      ]
+                                in if null modes then "0" else intercalate "|" modes
+
+instance CIntRepresentable SocketMsgFlag where
+  toCInt (SocketMsgFlag flags) = let readFlag field flag = if field flags then flag else 0
+                                     allFlags =
+                                        [ (socketMsgFlagOOB, (#const MSG_OOB))
+                                        , (socketMsgFlagPEEK, (#const MSG_PEEK))
+                                        , (socketMsgFlagDONTROUTE, (#const MSG_DONTROUTE))
+                                        , (socketMsgFlagCTRUNC, (#const MSG_CTRUNC))
+                                        , (socketMsgFlagPROXY, (#const MSG_PROXY))
+                                        , (socketMsgFlagTRUNC, (#const MSG_TRUNC))
+                                        , (socketMsgFlagDONTWAIT, (#const MSG_DONTWAIT))
+                                        , (socketMsgFlagEOR, (#const MSG_EOR))
+                                        , (socketMsgFlagWAITALL, (#const MSG_WAITALL))
+                                        , (socketMsgFlagFIN, (#const MSG_FIN))
+                                        , (socketMsgFlagSYN, (#const MSG_SYN))
+                                        , (socketMsgFlagCONFIRM, (#const MSG_CONFIRM))
+                                        , (socketMsgFlagRST, (#const MSG_RST))
+                                        , (socketMsgFlagERRQUEUE, (#const MSG_ERRQUEUE))
+                                        , (socketMsgFlagNOSIGNAL, (#const MSG_NOSIGNAL))
+                                        , (socketMsgFlagMORE, (#const MSG_MORE))
+                                        , (socketMsgFlagWAITFORONE, (#const MSG_WAITFORONE))
+                                        , (socketMsgFlagBATCH, (#const MSG_BATCH))
+                                        , (socketMsgFlagZEROCOPY, (#const MSG_ZEROCOPY))
+                                        , (socketMsgFlagFASTOPEN, (#const MSG_FASTOPEN))
+                                        , (socketMsgFlagCMSG_CLOEXEC, (#const MSG_CMSG_CLOEXEC))
+                                        ]
+                                     knownFlags = foldr (.|.) zeroBits $ map (uncurry readFlag) allFlags
+                                 in fromIntegral $ knownFlags .|. socketMsgFlagUnknown flags
+  fromCInt flags = let isset f = (flags .&. f) /= zeroBits
+                       allBitsKnown = foldr (.|.) zeroBits bitsKnown
+                       bitsKnown = [ (#const MSG_OOB)
+                                   , (#const MSG_PEEK)
+                                   , (#const MSG_DONTROUTE)
+                                   , (#const MSG_CTRUNC)
+                                   , (#const MSG_PROXY)
+                                   , (#const MSG_TRUNC)
+                                   , (#const MSG_DONTWAIT)
+                                   , (#const MSG_EOR)
+                                   , (#const MSG_WAITALL)
+                                   , (#const MSG_FIN)
+                                   , (#const MSG_SYN)
+                                   , (#const MSG_CONFIRM)
+                                   , (#const MSG_RST)
+                                   , (#const MSG_ERRQUEUE)
+                                   , (#const MSG_NOSIGNAL)
+                                   , (#const MSG_MORE)
+                                   , (#const MSG_WAITFORONE)
+                                   , (#const MSG_BATCH)
+                                   , (#const MSG_ZEROCOPY)
+                                   , (#const MSG_FASTOPEN)
+                                   , (#const MSG_CMSG_CLOEXEC)
+                                   ] in SocketMsgFlag $ GranularSocketMsgFlag
+                                        { socketMsgFlagOOB = isset (#const MSG_OOB)
+                                        , socketMsgFlagPEEK = isset (#const MSG_PEEK)
+                                        , socketMsgFlagDONTROUTE = isset (#const MSG_DONTROUTE)
+                                        , socketMsgFlagCTRUNC = isset (#const MSG_CTRUNC)
+                                        , socketMsgFlagPROXY = isset (#const MSG_PROXY)
+                                        , socketMsgFlagTRUNC = isset (#const MSG_TRUNC)
+                                        , socketMsgFlagDONTWAIT = isset (#const MSG_DONTWAIT)
+                                        , socketMsgFlagEOR = isset (#const MSG_EOR)
+                                        , socketMsgFlagWAITALL = isset (#const MSG_WAITALL)
+                                        , socketMsgFlagFIN = isset (#const MSG_FIN)
+                                        , socketMsgFlagSYN = isset (#const MSG_SYN)
+                                        , socketMsgFlagCONFIRM = isset (#const MSG_CONFIRM)
+                                        , socketMsgFlagRST = isset (#const MSG_RST)
+                                        , socketMsgFlagERRQUEUE = isset (#const MSG_ERRQUEUE)
+                                        , socketMsgFlagNOSIGNAL = isset (#const MSG_NOSIGNAL)
+                                        , socketMsgFlagMORE = isset (#const MSG_MORE)
+                                        , socketMsgFlagWAITFORONE = isset (#const MSG_WAITFORONE)
+                                        , socketMsgFlagBATCH = isset (#const MSG_BATCH)
+                                        , socketMsgFlagZEROCOPY = isset (#const MSG_ZEROCOPY)
+                                        , socketMsgFlagFASTOPEN = isset (#const MSG_FASTOPEN)
+                                        , socketMsgFlagCMSG_CLOEXEC = isset (#const MSG_CMSG_CLOEXEC)
+                                        , socketMsgFlagUnknown = fromIntegral $ flags .&. complement allBitsKnown
+                                        }

@@ -700,6 +700,7 @@ data SyscallEnterDetails_sendto = SyscallEnterDetails_sendto
   , addr_len :: CInt
   -- Peeked details
   , bufContents :: ByteString
+  , msgFlags :: SocketMsgFlag
   } deriving (Eq, Ord, Show)
 
 data SyscallExitDetails_sendto = SyscallExitDetails_sendto
@@ -1074,6 +1075,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , addr = addrPtr
       , addr_len = fromIntegral addr_len
       , bufContents
+      , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_recv -> do
     let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags } = syscallArgs
@@ -1413,8 +1415,8 @@ formatDetailedSyscallEnter = \case
       "send(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ")"
 
   DetailedSyscallEnter_sendto -- TODO sockaddr
-    SyscallEnterDetails_sendto{ fd, bufContents, len, flags, addr, addr_len } ->
-      "sendto(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ")"
+    SyscallEnterDetails_sendto{ fd, bufContents, len, msgFlags, addr, addr_len } ->
+      "sendto(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ hShow msgFlags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ")"
 
   DetailedSyscallEnter_recv
     SyscallEnterDetails_recv{ fd, ubuf, size, flags } ->
@@ -1549,8 +1551,8 @@ formatDetailedSyscallExit = \case
       "send(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ") = " ++ show retval
 
   DetailedSyscallExit_sendto -- TODO sockaddr
-    SyscallExitDetails_sendto{ enterDetail = SyscallEnterDetails_sendto{ fd, bufContents, len, flags, addr, addr_len }, retval } ->
-      "sendto(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ show flags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ") = " ++ show retval
+    SyscallExitDetails_sendto{ enterDetail = SyscallEnterDetails_sendto{ fd, bufContents, len, msgFlags, addr, addr_len }, retval } ->
+      "sendto(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show len ++ ", " ++ hShow msgFlags ++ ", " ++ show addr ++ ", " ++ show addr_len ++ ") = " ++ show retval
 
   DetailedSyscallExit_recv -- TODO buf
     SyscallExitDetails_recv{ enterDetail = SyscallEnterDetails_recv{ fd, size, flags }, retval, bufContents } ->
