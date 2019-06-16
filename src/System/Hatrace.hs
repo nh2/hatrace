@@ -1346,6 +1346,7 @@ data SyscallEnterDetails_sendto = SyscallEnterDetails_sendto
   , addrlen :: CInt
   -- Peeked details
   , bufContents :: ByteString
+  , msgFlags :: SendFlags
   } deriving (Eq, Ord, Show)
 
 
@@ -1849,6 +1850,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , addr = addrPtr
       , addrlen = fromIntegral addrlen
       , bufContents
+      , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_recv -> do
     let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags } = syscallArgs

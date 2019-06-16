@@ -41,6 +41,8 @@ module System.Hatrace.Types
   , SocketType(..)
   , SocketDetails(..)
   , ShutdownHow(..)
+  , SendFlags(..)
+  , GranularSendFlags(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -763,6 +765,75 @@ instance ArgFormatting ShutdownHow where
     ReceptionsDisallowed -> "SHUT_RD"
     TransmissionsDisallowed -> "SHUT_WR"
     BothDisallowed ->  "SHUT_RDWR"
+
+data SendFlags
+  = SendFlagsKnown GranularSendFlags
+  | SendFlagsUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data GranularSendFlags = GranularSendFlags
+  { msgOOB :: Bool
+  , msgDontRoute :: Bool
+  , msgDontWait :: Bool
+  , msgEOR :: Bool
+  , msgConfirm :: Bool
+  , msgNoSignal :: Bool
+  , msgMore :: Bool
+  } deriving (Eq, Ord, Show)
+
+instance ArgFormatting SendFlags where
+  formatArg (SendFlagsKnown flags) =
+    let flagValues = concat
+          [ if msgOOB flags then ["MSG_OOB"] else []
+          , if msgDontRoute flags then ["MSG_DONTROUTE"] else []
+          , if msgDontWait flags then ["MSG_DONTWAIT"] else []
+          , if msgEOR flags then ["MSG_EOR"] else []
+          , if msgConfirm flags then ["MSG_CONFIRM"] else []
+          , if msgNoSignal flags then ["MSG_NOSIGNAL"] else []
+          , if msgMore flags then ["MSG_MORE"] else []
+          ]
+    in if null flagValues then IntegerArg 0 else FixedStringArg (intercalate "|" flagValues)
+  formatArg (SendFlagsUnknown unknown) = IntegerArg (fromIntegral unknown)
+
+instance CIntRepresentable SendFlags where
+  toCInt (SendFlagsKnown flags) =
+    let readFlag field flag = if field flags then flag else 0
+        allFlags =
+          [ (msgOOB, (#const MSG_OOB))
+          , (msgDontRoute, (#const MSG_DONTROUTE))
+          , (msgDontWait, (#const MSG_DONTWAIT))
+          , (msgEOR, (#const MSG_EOR))
+          , (msgConfirm, (#const MSG_CONFIRM))
+          , (msgNoSignal, (#const MSG_NOSIGNAL))
+          , (msgMore, (#const MSG_MORE))
+          ]
+    in foldr (.|.) zeroBits $ map (uncurry readFlag) allFlags
+  toCInt (SendFlagsUnknown unknown) = unknown
+  fromCInt flags =
+    let isset f = flags `hasSetBits` f
+        allBitsKnown = foldr (.|.) zeroBits bitsKnown
+        bitsKnown =
+          [ (#const MSG_OOB)
+          , (#const MSG_DONTROUTE)
+          , (#const MSG_DONTWAIT)
+          , (#const MSG_EOR)
+          , (#const MSG_CONFIRM)
+          , (#const MSG_NOSIGNAL)
+          , (#const MSG_MORE)
+          ]
+        onlyKnown = flags .&. complement allBitsKnown /= zeroBits
+    in if onlyKnown
+       then SendFlagsKnown $
+            GranularSendFlags
+            { msgOOB = isset (#const MSG_OOB)
+            , msgDontRoute = isset (#const MSG_DONTROUTE)
+            , msgDontWait = isset (#const MSG_DONTWAIT)
+            , msgEOR = isset (#const MSG_EOR)
+            , msgConfirm = isset (#const MSG_CONFIRM)
+            , msgNoSignal = isset (#const MSG_NOSIGNAL)
+            , msgMore = isset (#const MSG_MORE)
+            }
+       else SendFlagsUnknown flags
 
 instance ArgFormatting TimespecStruct where
   formatArg TimespecStruct {..} =
