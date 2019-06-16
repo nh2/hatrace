@@ -524,6 +524,29 @@ spec = before_ assertNoChildren $ do
               ]
         renameToTmpFileEvents `shouldSatisfy` (not . null)
 
+    describe "unlink" $ do
+      it "occurs when we delete a file" $ do
+        fileToUnlink <- emptySystemTempFile "unlink-test"
+        let testProgram = "example-programs-build/unlink"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [fileToUnlink]
+        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv $
+          syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let unlinkedFiles =
+              [ fileToUnlink
+              | (_pid
+                , Right (DetailedSyscallExit_unlink
+                          SyscallExitDetails_unlink
+                          { enterDetail = SyscallEnterDetails_unlink { pathnameBS }
+                          , retval
+                          })
+                ) <- events
+              , pathnameBS == T.encodeUtf8 (T.pack fileToUnlink)
+              , retval == fromIntegral 0 -- we expect the unlink to be successful
+              ]
+        unlinkedFiles `shouldBe` [fileToUnlink]
+
     describe "pipe" $ do
       it "seen when piping output in bash" $ do
         argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
