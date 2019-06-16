@@ -17,6 +17,10 @@
 module System.Hatrace.Types
   ( FileAccessMode(..)
   , GranularAccessMode(..)
+  , MemoryProtectMode(..)
+  , GranularMemoryProtectMode(..)
+  , MMapMode(..)
+  , GranularMMapMode(..)
   , fileExistence
   , StatStruct(..)
   , TimespecStruct(..)
@@ -96,6 +100,275 @@ instance CIntRepresentable FileAccessMode where
                    }
     where
       accessBits = (#const R_OK) .|. (#const W_OK) .|. (#const X_OK)
+
+data MemoryProtectMode
+  = MemoryProtectKnown GranularMemoryProtectMode
+  | MemoryProtectUnknown CInt
+  deriving (Eq, Ord, Show)
+
+instance ArgFormatting MemoryProtectMode where
+  formatArg = FixedStringArg . formatMode
+    where
+      formatMode (MemoryProtectKnown mode) =
+        let granularModes = concat
+              [ if protectModeExec  mode then ["PROT_EXEC"]  else []
+              , if protectModeRead  mode then ["PROT_READ"]  else []
+              , if protectModeWrite mode then ["PROT_WRITE"] else []
+              , if protectModeNone  mode then ["PROT_NONE"]  else []
+              ]
+        in if null granularModes then "0" else intercalate "|" granularModes
+      formatMode (MemoryProtectUnknown x) = show x
+
+data GranularMemoryProtectMode = GranularMemoryProtectMode
+  { protectModeExec :: Bool
+  , protectModeRead :: Bool
+  , protectModeWrite :: Bool
+  , protectModeNone :: Bool
+  } deriving (Eq, Ord, Show)
+
+instance CIntRepresentable MemoryProtectMode where
+  toCInt (MemoryProtectKnown gp) = x .|. r .|. w .|. n
+    where
+      x = if protectModeExec gp then (#const PROT_EXEC)  else 0
+      r = if protectModeExec gp then (#const PROT_READ)  else 0
+      w = if protectModeExec gp then (#const PROT_WRITE) else 0
+      n = if protectModeExec gp then (#const PROT_NONE)  else 0
+  toCInt (MemoryProtectUnknown x) = x
+  fromCInt m | (m .&. complement protectBits) /= zeroBits = MemoryProtectUnknown m
+             | otherwise =
+                let isset f = (m .&. f) /= zeroBits
+                in MemoryProtectKnown GranularMemoryProtectMode
+                   { protectModeExec  = isset (#const PROT_EXEC)
+                   , protectModeRead  = isset (#const PROT_READ)
+                   , protectModeWrite = isset (#const PROT_WRITE)
+                   , protectModeNone  = isset (#const PROT_NONE)
+                   }
+    where
+      protectBits = (#const PROT_EXEC) .|. (#const PROT_READ) .|. (#const PROT_WRITE) .|. (#const PROT_NONE)
+
+data MMapMode
+  = MMapModeKnown GranularMMapMode
+  | MMapModeUnknown CInt
+  deriving (Eq, Ord, Show)
+
+instance ArgFormatting MMapMode where
+  formatArg = FixedStringArg . formatMode
+    where
+      formatMode (MMapModeKnown mode) =
+        let granularModes = concat
+              [ case mapType mode of
+                  MMapShared -> ["MAP_SHARED"]
+                  MMapPrivate -> ["MAP_PRIVATE"]
+#ifdef MAP_SHARED_VALIDATE
+                  MMapSharedValidate -> ["MAP_SHARED_VALIDATE"]
+#endif
+                  MMapTypeUnknown x -> [show x]
+              , if map32Bit mode          then ["MAP_32BIT"]           else []
+              , if mapAnonymous mode      then ["MAP_ANONYMOUS"]       else []
+              , if mapDenyWrite mode      then ["MAP_DENYWRITE"]       else []
+              , if mapExecutable mode     then ["MAP_EXECUTABLE"]      else []
+              , if mapFixed mode          then ["MAP_FIXED"]           else []
+#ifdef MAP_FIXED_NOREPLACE
+              , if mapFixedNoreplace mode then ["MAP_FIXED_NOREPLACE"] else []
+#endif
+              , if mapGrowsdown mode      then ["MAP_GROWSDOWN"]       else []
+              , if mapHugetlb mode        then ["MAP_HUGETLB"]         else []
+#ifdef MAP_HUGE_2MB
+              , if mapHuge2Mb mode        then ["MAP_HUGE_2MB"]        else []
+#endif
+#ifdef MAP_HUGE_1GB
+              , if mapHuge1Gb mode        then ["MAP_HUGE_1GB"]        else []
+#endif
+              , if mapLocked mode         then ["MAP_LOCKED"]          else []
+              , if mapNonblock mode       then ["MAP_NONBLOCK"]        else []
+              , if mapNoReserve mode      then ["MAP_NORESERVE"]       else []
+              , if mapPopulate mode       then ["MAP_POPULATE"]        else []
+              , if mapStack mode          then ["MAP_STACK"]           else []
+#ifdef MAP_SYNC
+              , if mapSync mode           then ["MAP_SYNC"]            else []
+#endif
+#ifdef MAP_UNINITIALIZED
+              , if mapUninitialized mode  then ["MAP_UNINITIALIZED"]   else []
+#endif
+              ]
+        in if null granularModes then "0" else intercalate "|" granularModes
+      formatMode (MMapModeUnknown x) = show x
+
+-- | https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/mman-common.h
+-- defines MAP_TYPE as 0x0f so in theory there could be up to 15 types but please keep
+-- in mind that it's Linux-specific
+data MMapType
+  = MMapShared
+  -- ^ Share this mapping.
+  | MMapPrivate
+  -- ^ Create a private copy-on-write mapping.
+#ifdef MAP_SHARED_VALIDATE
+  | MMapSharedValidate
+  -- ^ This flag provides the same behavior as MAP_SHARED except that MMapShared
+  -- mappings ignore unknown flags in flags. By contrast, when creating a mapping
+  -- using MMapSharedValidate, the kernel verifies all passed flags are known and
+  -- fails the mapping with the error EOPNOTSUPP for unknown flags. This mapping
+  -- type is also required to be able to use some mapping flags (e.g., mapSync).
+  -- (since Linux 4.15)
+#endif
+  | MMapTypeUnknown CUShort
+  deriving (Eq, Ord, Show)
+
+-- | mmap mode, MAP_FILE and MAP_EXECUTABLE are ignored on Linux
+data GranularMMapMode = GranularMMapMode
+  { mapType :: MMapType
+  , map32Bit :: Bool
+  , mapAnonymous :: Bool
+  , mapDenyWrite :: Bool
+  , mapExecutable :: Bool
+  , mapFixed :: Bool
+#ifdef MAP_FIXED_NOREPLACE
+  , mapFixedNoreplace :: Bool
+    -- ^ since Linux 4.17
+#endif
+  , mapGrowsdown :: Bool
+  , mapHugetlb :: Bool
+#ifdef MAP_HUGE_2MB
+  , mapHuge2Mb :: Bool
+#endif
+#ifdef MAP_HUGE_1GB
+  , mapHuge1Gb :: Bool
+#endif
+  , mapLocked :: Bool
+  , mapNonblock :: Bool
+  , mapNoReserve :: Bool
+  , mapPopulate :: Bool
+  , mapStack :: Bool
+#ifdef MAP_SYNC
+  , mapSync :: Bool
+    -- ^ since Linux 4.15
+#endif
+#ifdef MAP_UNINITIALIZED
+  , mapUninitialized :: Bool
+#endif
+  } deriving (Eq, Ord, Show)
+
+instance CIntRepresentable MMapMode where
+  toCInt (MMapModeKnown gp) = foldr (.|.) typeBits setBits
+    where
+      typeBits = fromIntegral $ case mapType gp of
+            MMapShared -> (#const MAP_SHARED)
+            MMapPrivate -> (#const MAP_PRIVATE)
+#ifdef MAP_SHARED_VALIDATE
+            MMapSharedValidate -> (#const MAP_SHARED_VALIDATE)
+#endif
+            MMapTypeUnknown x -> x
+      setBits =
+        [ if map32Bit gp          then (#const MAP_32BIT)           else 0
+        , if mapAnonymous gp      then (#const MAP_ANONYMOUS)       else 0
+        , if mapDenyWrite gp      then (#const MAP_DENYWRITE)       else 0
+        , if mapExecutable gp     then (#const MAP_EXECUTABLE)      else 0
+        , if mapFixed gp          then (#const MAP_FIXED)           else 0
+#ifdef MAP_FIXED_NOREPLACE
+        , if mapFixedNoreplace gp then (#const MAP_FIXED_NOREPLACE) else 0
+#endif
+        , if mapGrowsdown gp      then (#const MAP_GROWSDOWN)       else 0
+        , if mapHugetlb gp        then (#const MAP_HUGETLB)         else 0
+#ifdef MAP_HUGE_2MB
+        , if mapHuge2Mb gp        then (#const MAP_HUGE_2MB)        else 0
+#endif
+#ifdef MAP_HUGE_1GB
+        , if mapHuge1Gb gp        then (#const MAP_HUGE_1GB)        else 0
+#endif
+        , if mapLocked gp         then (#const MAP_LOCKED)          else 0
+        , if mapNonblock gp       then (#const MAP_NONBLOCK)        else 0
+        , if mapNoReserve gp      then (#const MAP_NORESERVE)       else 0
+        , if mapPopulate gp       then (#const MAP_POPULATE)        else 0
+        , if mapStack gp          then (#const MAP_STACK)           else 0
+#ifdef MAP_SYNC
+        , if mapSync gp           then (#const MAP_SYNC)            else 0
+#endif
+#ifdef MAP_UNINITIALIZED
+        , if mapUninitialized gp  then (#const MAP_UNINITIALIZED)   else 0
+#endif
+        ]
+  toCInt (MMapModeUnknown x) = x
+  fromCInt m | (m .&. complement mapBits) /= zeroBits = MMapModeUnknown m
+             | otherwise =
+                let isset f = (m .&. f) == f
+                in MMapModeKnown GranularMMapMode
+                   { mapType           =
+#ifdef MAP_SHARED_VALIDATE
+                       if isset (#const MAP_SHARED_VALIDATE)
+                       then MMapSharedValidate
+                       else
+#endif
+                         if isset (#const MAP_SHARED)
+                         then MMapShared
+                         else
+                           if isset (#const MAP_PRIVATE)
+                           then MMapPrivate
+                           else error "Unexpected mmap sharing type"
+                   , map32Bit          = isset (#const MAP_32BIT)
+                   , mapAnonymous      = isset (#const MAP_ANONYMOUS)
+                   , mapDenyWrite      = isset (#const MAP_DENYWRITE)
+                   , mapExecutable     = isset (#const MAP_EXECUTABLE)
+                   , mapFixed          = isset (#const MAP_FIXED)
+#ifdef MAP_FIXED_NOREPLACE
+                   , mapFixedNoreplace = isset (#const MAP_FIXED_NOREPLACE)
+#endif
+                   , mapGrowsdown      = isset (#const MAP_GROWSDOWN)
+                   , mapHugetlb        = isset (#const MAP_HUGETLB)
+#ifdef MAP_HUGE_2MB
+                   , mapHuge2Mb        = isset (#const MAP_HUGE_2MB)
+#endif
+#ifdef MAP_HUGE_1GB
+                   , mapHuge1Gb        = isset (#const MAP_HUGE_1GB)
+#endif
+                   , mapLocked         = isset (#const MAP_LOCKED)
+                   , mapNonblock       = isset (#const MAP_NONBLOCK)
+                   , mapNoReserve      = isset (#const MAP_NORESERVE)
+                   , mapPopulate       = isset (#const MAP_POPULATE)
+                   , mapStack          = isset (#const MAP_STACK)
+#ifdef MAP_SYNC
+                   , mapSync           = isset (#const MAP_SYNC)
+#endif
+#ifdef MAP_UNINITIALIZED
+                   , mapUninitialized  = isset (#const MAP_UNINITIALIZED)
+#endif
+                   }
+    where
+        mapBits = foldr (.|.) (fromIntegral (0 :: Int)) $
+          [ #const MAP_SHARED
+#ifdef MAP_SHARED_VALIDATE
+          , #const MAP_SHARED_VALIDATE
+#endif
+          , #const MAP_PRIVATE
+          , #const MAP_32BIT
+          , #const MAP_ANON
+          , #const MAP_ANONYMOUS
+          , #const MAP_DENYWRITE
+          , #const MAP_EXECUTABLE
+          , #const MAP_FILE
+          , #const MAP_FIXED
+#ifdef MAP_FIXED_NOREPLACE
+          , #const MAP_FIXED_NOREPLACE
+#endif
+          , #const MAP_GROWSDOWN
+          , #const MAP_HUGETLB
+#ifdef MAP_HUGE_2MB
+          , #const MAP_HUGE_2MB
+#endif
+#ifdef MAP_HUGE_1GB
+          , #const MAP_HUGE_1GB
+#endif
+          , #const MAP_LOCKED
+          , #const MAP_NONBLOCK
+          , #const MAP_NORESERVE
+          , #const MAP_POPULATE
+          , #const MAP_STACK
+#ifdef MAP_SYNC
+          , #const MAP_SYNC
+#endif
+#ifdef MAP_UNINITIALIZED
+          , #const MAP_UNINITIALIZED
+#endif
+          ]
 
 data StatStruct = StatStruct
   { st_dev :: CULong -- ^ ID of device containing file
