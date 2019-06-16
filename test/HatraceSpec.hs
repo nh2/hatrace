@@ -63,24 +63,26 @@ spec = before_ assertNoChildren $ do
   -- hspec swallows test failure messages if after the test faulure the
   -- `after_` action fails as well, showing only the latter's message.
 
+  let muted _ = return ()
+
   describe "traceCreateProcess" $ do
 
     it "does not crash for this echo process" $ do
-      traceForkProcess "echo" ["hello"] `shouldReturn` ExitSuccess
+      traceForkProcess "echo" ["hello"] muted  `shouldReturn` ExitSuccess
 
     -- TODO Instead of compiling things here with `make`, do it as a Cabal hook.
 
     it "does not crash for hello.asm with 32-bit API" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-i386-elf64"]
-      traceForkProcess "example-programs-build/hello-linux-i386-elf64" [] `shouldReturn` ExitSuccess
+      traceForkProcess "example-programs-build/hello-linux-i386-elf64" [] muted `shouldReturn` ExitSuccess
 
     it "does not crash for hello.asm real 32-bit" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-i386"]
-      traceForkProcess "example-programs-build/hello-linux-i386" [] `shouldReturn` ExitSuccess
+      traceForkProcess "example-programs-build/hello-linux-i386" [] muted `shouldReturn` ExitSuccess
 
     it "does not crash for hello.asm with 64-bit API" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
-      traceForkProcess "example-programs-build/hello-linux-x86_64" [] `shouldReturn` ExitSuccess
+      traceForkProcess "example-programs-build/hello-linux-x86_64" [] muted `shouldReturn` ExitSuccess
 
     it "does not hang when the traced program segfaults" $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
@@ -91,7 +93,7 @@ spec = before_ assertNoChildren $ do
         -- added 128 indicate (is that how the kernel tells us whether or not
         -- "core dumped" happened?).
         -- See also https://github.com/nh2/hatrace/issues/4#issuecomment-475196313
-        traceForkProcess "example-programs-build/segfault" [] `shouldReturn` ExitFailure 11
+        traceForkProcess "example-programs-build/segfault" [] muted `shouldReturn` ExitFailure 11
 
   describe "sourceTraceForkExecvFullPathWithSink" $ do
 
