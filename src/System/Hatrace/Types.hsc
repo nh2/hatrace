@@ -16,8 +16,15 @@ module System.Hatrace.Types
   , CIntRepresentable(..)
   , HatraceShow(..)
   , SockAddr(..)
+  , UnixSockAddr(..)
+  , InetSockAddr(..)
+  , Inet6SockAddr(..)
+  , NetlinkSockAddr(..)
+  , PacketSockAddr(..)
   , wrapPeekVariableLength
   , peekSockAddr
+  , AF(..)
+  , afToInt
   ) where
 
 import           Data.Bits
@@ -86,9 +93,6 @@ instance CIntRepresentable FileAccessMode where
       accessBits = (#const R_OK) .|. (#const W_OK) .|. (#const X_OK)
 
 
-data Inet6Addr = Inet6Addr { s6_addr :: Word128 } -- IPv6 address (16 bytes)
-  deriving (Eq, Ord, Show)
-
 data SockAddr
   = SockAddrUnix UnixSockAddr
   | SockAddrInet InetSockAddr
@@ -102,9 +106,6 @@ data UnixSockAddr = UnixSockAddr
   { sun_family :: !CUShort -- ^ should be AF_UNIX
   , sun_path :: !BS.ByteString
   }
-  deriving (Eq, Ord, Show)
-
-data InetAddr = InetAddr { s_addr :: CUInt }
   deriving (Eq, Ord, Show)
 
 data InetSockAddr = InetSockAddr
@@ -147,6 +148,25 @@ data UnsupportedFamilySockAddr = UnsupportedFamilySockAddr
   }
   deriving (Eq, Ord, Show)
 
+data InetAddr = InetAddr { s_addr :: CUInt }
+  deriving (Eq, Ord, Show)
+
+data Inet6Addr = Inet6Addr { s6_addr :: Word128 } -- IPv6 address (16 bytes)
+  deriving (Eq, Ord, Show)
+
+data AF = AF_UNIX
+        | AF_INET
+        | AF_INET6
+        | AF_NETLINK
+        | AF_PACKET
+  deriving (Eq, Ord, Show)
+
+afToInt :: AF -> Int
+afToInt AF_UNIX = (#const AF_UNIX)
+afToInt AF_INET = (#const AF_INET)
+afToInt AF_INET6 = (#const AF_INET6)
+afToInt AF_NETLINK = (#const AF_NETLINK)
+afToInt AF_PACKET = (#const AF_PACKET)
 
 wrapPeekVariableLength :: TracedProcess -> Ptr a -> Word64 -> (Ptr CChar -> Word64 -> IO b) -> IO b
 wrapPeekVariableLength process remotePtr numBytes f = do
@@ -175,7 +195,6 @@ peekUnixSockAddr p addrSize = do
                                           sun_family = family,
                                           sun_path = ""
                                           }
-
     _ -> do
       let pathPtr = #{ptr struct sockaddr_un, sun_path} p :: Ptr CChar
       let pathSize = addrSize - #{size sa_family_t} :: Word64

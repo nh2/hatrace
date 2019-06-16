@@ -5,7 +5,7 @@
 
 module HatraceSpec where
 
-import           Control.Monad (when)
+import           Control.Monad (when, forM_)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import qualified Data.ByteString as BS
@@ -31,6 +31,7 @@ import           Text.Read (readMaybe)
 import           UnliftIO.Exception (bracket)
 
 import System.Hatrace
+import System.Hatrace.Types
 
 
 -- | Assertion we run before each test to ensure no leftover child processes
@@ -552,11 +553,34 @@ spec = before_ assertNoChildren $ do
 
     describe "connect" $ do
       it "seen when invoked in a program" $ do
+        let af = show . afToInt
         let connect = "example-programs-build/connect"
         callProcess "make" ["--quiet", connect]
-        argv <- procToArgv connect ["0"]
-        (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
-            syscallExitDetailsOnlyConduit .| CL.consume
-        exitCode `shouldBe` ExitSuccess
-
+        forM_ [AF_UNIX, AF_INET, AF_INET6, AF_NETLINK] $ \code -> do
+          argv <- procToArgv connect [af code]
+          (exitCode, events) <-
+            sourceTraceForkExecvFullPathWithSink argv $
+              syscallEnterDetailsOnlyConduit .| CL.consume
+          exitCode `shouldBe` ExitSuccess
+          let connectEnterData =
+                [ addr
+                  | (_pid
+                    , (DetailedSyscallEnter_connect
+                         SyscallEnterDetails_connect
+                         { sockAddr = addr })
+                    ) <- events
+                ]
+          length connectEnterData `shouldBe` 1
+          let addr:_ = connectEnterData
+          case (code, addr) of
+            (AF_UNIX, SockAddrUnix sa) -> do
+              sun_family sa `shouldBe` fromIntegral (afToInt AF_UNIX)
+            (AF_INET, SockAddrInet sa) -> do
+              sin_family sa `shouldBe` fromIntegral (afToInt AF_INET)
+            (AF_INET6, SockAddrInet6 sa) -> do
+              sin6_family sa `shouldBe` fromIntegral (afToInt AF_INET6)
+            (AF_NETLINK, SockAddrNetlink sa) -> do
+              nl_family sa `shouldBe` fromIntegral (afToInt AF_NETLINK)
+            (AF_PACKET, SockAddrPacket sa) -> do
+              sll_family sa `shouldBe` fromIntegral (afToInt AF_PACKET)
+            _ -> fail $ "Attribute family and code don't match. Expected: " ++ show (af code) ++ "(" ++ show code ++")"
