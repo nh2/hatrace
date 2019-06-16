@@ -86,15 +86,18 @@ spec = before_ assertNoChildren $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
       -- Disable core dumps for the test to not litter in the working tree.
       withCoredumpsDisabled $ do
-        -- Note: On some machines, the exit code is 11, on others it's 139 instead.
-        -- We haven't figured out yet what makes that difference.
-        -- 11 is certainly signal SIGSEGV, and usually 128+N indicates "killed by
-        -- signal N", but it's unclear why on some machine, the 128-bit isn't set.
-        -- In particular, I observe this difference even between my laptop and
-        -- my desktop, which run the same OS and same kernel version.
-        -- See also https://github.com/nh2/hatrace/issues/4#issuecomment-475196313
-        -- For now, we just accept both results, but we should really figure out
-        -- what creates this difference.
+        -- Note: Despite disabling core dump files by setting RLIMIT_CORE to 0,
+        -- on some systems, the core dump flag (128) will still be set after a
+        -- crash.
+        --
+        -- This happens when /proc/sys/kernel/core_pattern is set to a value
+        -- that starts with a pipe, triggering the execution of a handling
+        -- program, no matter what value RLIMIT_CORE is set to. We unfortunately
+        -- can change this setting neither only for our processes nor without
+        -- root privileges. We therefore simply ignore the core dump flag if
+        -- present.
+        --
+        -- See also: core(5) - accessible by running `man 5 core`.
         exitCode <- traceForkProcess "example-programs-build/segfault" []
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
