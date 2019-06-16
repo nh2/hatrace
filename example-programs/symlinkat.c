@@ -6,7 +6,7 @@
 
 void die_usage(void)
 {
-  fprintf(stderr, "Usage: symlinkat target directory linkpath\n");
+  fprintf(stderr, "Usage: symlinkat target linkpath\n");
   exit(1);
 }
 
