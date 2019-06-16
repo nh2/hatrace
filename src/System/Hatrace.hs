@@ -137,6 +137,7 @@ import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), F
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
+import           System.Hatrace.FdNames (resolveFdName)
 import           System.Hatrace.SignalMap (signalMap)
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
@@ -449,6 +450,7 @@ data SyscallEnterDetails_write = SyscallEnterDetails_write
   , buf :: Ptr Void
   , count :: CSize
   -- Peeked details
+  , filePath :: Maybe FilePath
   , bufContents :: ByteString
   } deriving (Eq, Ord, Show)
 
@@ -463,6 +465,8 @@ data SyscallEnterDetails_read = SyscallEnterDetails_read
   { fd :: CInt
   , buf :: Ptr Void
   , count :: CSize
+  -- Peeked details
+  , filePath :: Maybe FilePath
   } deriving (Eq, Ord, Show)
 
 
@@ -476,6 +480,8 @@ data SyscallExitDetails_read = SyscallExitDetails_read
 
 data SyscallEnterDetails_close = SyscallEnterDetails_close
   { fd :: CInt
+  -- Peeked details
+  , filePath :: Maybe FilePath
   } deriving (Eq, Ord, Show)
 
 
@@ -820,21 +826,27 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       }
   Syscall_write -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
+    let fd' = fromIntegral fd
     let bufPtr = word64ToPtr bufAddr
     bufContents <- peekBytes proc bufPtr (fromIntegral count)
+    filePath <- resolveFdName pid fd'
     pure $ DetailedSyscallEnter_write $ SyscallEnterDetails_write
-      { fd = fromIntegral fd
+      { fd = fd'
       , buf = bufPtr
       , count = fromIntegral count
+      , filePath
       , bufContents
       }
   Syscall_read -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
+    let fd' = fromIntegral fd
     let bufPtr = word64ToPtr bufAddr
+    filePath <- resolveFdName pid fd'
     pure $ DetailedSyscallEnter_read $ SyscallEnterDetails_read
-      { fd = fromIntegral fd
+      { fd = fd'
       , buf = bufPtr
       , count = fromIntegral count
+      , filePath
       }
   Syscall_execve -> do
     let SyscallArgs{ arg0 = filenameAddr, arg1 = argvPtrsAddr, arg2 = envpPtrsAddr } = syscallArgs
@@ -874,8 +886,11 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       }
   Syscall_close -> do
     let SyscallArgs{ arg0 = fd } = syscallArgs
+    let fd' = fromIntegral fd
+    filePath <- resolveFdName pid fd'
     pure $ DetailedSyscallEnter_close $ SyscallEnterDetails_close
-      { fd = fromIntegral fd
+      { fd = fd'
+      , filePath
       }
   Syscall_rename -> do
     let SyscallArgs{ arg0 = oldpathAddr, arg1 = newpathAddr } = syscallArgs
@@ -1219,16 +1234,16 @@ formatDetailedSyscallEnter = \case
       "faccessat(" ++ show dirfd ++ ", " ++ show pathnameBS ++ ", " ++ hShow accessMode ++ ", " ++ show flags ++")"
 
   DetailedSyscallEnter_write
-    SyscallEnterDetails_write{ fd, bufContents, count } ->
-      "write(" ++ show fd ++ ", " ++ show bufContents ++ ", " ++ show count ++ ")"
+    SyscallEnterDetails_write{ fd, filePath, bufContents, count } ->
+      "write(" ++ show fd ++ ", " ++ show filePath ++ ", " ++ show bufContents ++ ", " ++ show count ++ ")"
 
   DetailedSyscallEnter_read
-    SyscallEnterDetails_read{ fd, count } ->
-      "read(" ++ show fd ++ ", void *buf, " ++ show count ++ ")"
+    SyscallEnterDetails_read{ fd, filePath, count } ->
+      "read(" ++ show fd ++ ", " ++ show filePath ++ ", void *buf, " ++ show count ++ ")"
 
   DetailedSyscallEnter_close
-    SyscallEnterDetails_close{ fd } ->
-      "close(" ++ show fd ++ ")"
+    SyscallEnterDetails_close{ fd, filePath } ->
+      "close(" ++ show fd ++ ", " ++ show filePath ++ ")"
 
   DetailedSyscallEnter_rename
     SyscallEnterDetails_rename{ oldpathBS, newpathBS } ->
