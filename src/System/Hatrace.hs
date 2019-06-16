@@ -1521,7 +1521,7 @@ formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
         return $ HatraceEvent pid (EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
 
       SyscallExit (syscall, syscallArgs) -> do
-        (formatted, outcome) <- liftIO $ formatSyscallExit' syscall syscallArgs pid
+        (formatted, outcome) <- liftIO $ formatSyscallExit syscall syscallArgs pid
         return $ HatraceEvent pid (EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
 
     PTRACE_EVENT_Stop ptraceEvent ->
@@ -1631,8 +1631,8 @@ unimplementedArgs :: SyscallArgs -> [FormattedArg]
 unimplementedArgs args =
   [ formatArg (argN args) | argN <- [arg0, arg1, arg2, arg3, arg4, arg5] ]
 
-formatSyscallExit' :: Syscall -> SyscallArgs -> CPid -> IO (FormattedSyscall, ReturnOrErrno)
-formatSyscallExit' syscall syscallArgs pid = do
+formatSyscallExit :: Syscall -> SyscallArgs -> CPid -> IO (FormattedSyscall, ReturnOrErrno)
+formatSyscallExit syscall syscallArgs pid = do
   (result, mbErrno) <- getExitedSyscallResult pid
 
   let unknownExit name = definedArgsExit name (unimplementedArgs syscallArgs)
@@ -1655,14 +1655,14 @@ formatSyscallExit' syscall syscallArgs pid = do
                           [ argPlaceholder "TODO implement remembering arguments" ]
         Nothing -> do
           details <- getSyscallExitDetails' knownSyscall syscallArgs result pid
-          formatDetailedSyscallExit' details $ \_syscall _syscallArgs _result ->
+          formatDetailedSyscallExit details $ \_syscall _syscallArgs _result ->
             unknownExit $ "unimplemented_syscall(" ++ show syscall ++ ")"
 
-formatDetailedSyscallExit' ::
+formatDetailedSyscallExit ::
      DetailedSyscallExit
   -> (Syscall -> SyscallArgs -> Word64 -> IO (FormattedSyscall, ReturnOrErrno))
   -> IO (FormattedSyscall, ReturnOrErrno)
-formatDetailedSyscallExit' detailedExit handleUnimplemented =
+formatDetailedSyscallExit detailedExit handleUnimplemented =
   case detailedExit of
     DetailedSyscallExit_open details -> formatDetails details
 
