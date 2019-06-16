@@ -34,6 +34,7 @@ import           Text.Read (readMaybe)
 import           UnliftIO.Exception (bracket)
 
 import System.Hatrace
+import System.Hatrace.Format
 import System.Hatrace.Types
 
 
@@ -625,6 +626,30 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         pathsLstatRequested `shouldSatisfy` ("/dev/null" `elem`)
+
+    describe "mmap" $ do
+      it "sees the correct arguments" $ do
+        let mmapSyscall = "example-programs-build/mmap-syscall"
+        callProcess "make" ["--quiet", mmapSyscall]
+        argv <- procToArgv mmapSyscall []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let mmapArguments =
+              [ enterDetail (exitDetails :: SyscallExitDetails_mmap)
+              | (_pid
+                , Right (DetailedSyscallExit_mmap
+                         exitDetails)
+                ) <- events
+              ]
+        let SyscallEnterDetails_mmap
+              {addr, len, prot, flags, offset} = last mmapArguments
+        addr `shouldBe` nullPtr
+        len `shouldBe` fromIntegral (100 :: Int)
+        formatArg prot `shouldBe` FixedStringArg "PROT_READ"
+        formatArg flags `shouldBe` FixedStringArg "MAP_SHARED"
+        offset `shouldBe` fromIntegral (0 :: Int)
 
     describe "time" $ do
       it "seen called by trigger-time executable" $ do
