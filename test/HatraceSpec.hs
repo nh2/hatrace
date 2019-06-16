@@ -18,6 +18,8 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (eBADF)
+import           Foreign.Ptr (nullPtr, plusPtr)
+import           Foreign.Storable (sizeOf)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
@@ -519,47 +521,6 @@ spec = before_ assertNoChildren $ do
               ]
         renameToTmpFileEvents `shouldSatisfy` (not . null)
 
-    describe "symlink" $ do
-      it "seen exactly once for 'ln -s tempfile tempfilesymlink'" $ do
-        tmpFile <- emptySystemTempFile "test-output"
-        let symlinkPath = tmpFile ++ "symlink"
-        argv <- procToArgv "bash" ["-c", "ln -s " ++ tmpFile ++ " " ++ symlinkPath]
-        (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
-            syscallExitDetailsOnlyConduit .| CL.consume
-        exitCode `shouldBe` ExitSuccess
-        let symlinkEvents =
-              [ linkpathBS
-              | (_pid
-                , Right (DetailedSyscallExit_symlink
-                         SyscallExitDetails_symlink
-                         { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }})
-                ) <- events
-                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
-              ]
-        length symlinkEvents `shouldBe` 1
-
-    describe "symlinkat" $ do
-      it "seen exactly once for './symlinkat" $ do
-        callProcess "make" ["--quiet", "example-programs-build/symlinkat"]
-        tmpFile <- emptySystemTempFile "test-output"
-        let symlinkPath = tmpFile ++ "symlink"
-        argv <- procToArgv "example-programs-build/symlinkat" [tmpFile, symlinkPath]
-        (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
-            syscallExitDetailsOnlyConduit .| CL.consume
-        exitCode `shouldBe` ExitSuccess
-        let symlinkEvents =
-              [ linkpathBS
-              | (_pid
-                , Right (DetailedSyscallExit_symlinkat
-                         SyscallExitDetails_symlinkat
-                         { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }})
-                ) <- events
-                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
-              ]
-        length symlinkEvents `shouldBe` 1
-
     describe "pipe" $ do
       it "seen when piping output in bash" $ do
         argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
@@ -631,3 +592,27 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         timeDetails `shouldBe` [(True, Nothing), (True, Just True)]
+
+    describe "brk" $ do
+      it "has correct output after changing program break" $ do
+        let brkCall = "example-programs-build/brk-syscall"
+        callProcess "make" ["--quiet", brkCall]
+        argv <- procToArgv brkCall []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let brkCallAddresses =
+              [ (addr, brkResult)
+              | (_pid
+                , Right (DetailedSyscallExit_brk
+                         SyscallExitDetails_brk
+                         { enterDetail = SyscallEnterDetails_brk{ addr }, brkResult })
+                ) <- events
+              ]
+        brkCallAddresses `shouldSatisfy` ((3 <=) . length)
+        let (initArg, initAddr) = brkCallAddresses !! (length brkCallAddresses - 3)
+        let extAddr = plusPtr initAddr (0x80 * sizeOf initAddr)
+        initArg `shouldBe` nullPtr
+        elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
+        elem (initAddr, initAddr) brkCallAddresses `shouldBe` True
