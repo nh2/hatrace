@@ -172,7 +172,9 @@ data GranularMMapMode = GranularMMapMode
   , mapExecutable :: Bool
   , mapFile :: Bool
   , mapFixed :: Bool
+#ifdef MAP_FIXED_NOREPLACE
   , mapFixedNoreplace :: Bool
+#endif
   , mapGrowsdown :: Bool
   , mapHugetlb :: Bool
 #ifdef MAP_HUGE_2MB
@@ -186,7 +188,9 @@ data GranularMMapMode = GranularMMapMode
   , mapNoReserve :: Bool
   , mapPopulate :: Bool
   , mapStack :: Bool
+#ifdef MAP_SYNC
   , mapSync :: Bool
+#endif
 #ifdef MAP_UNINITIALIZED
   , mapUninitialized :: Bool
 #endif
@@ -205,7 +209,9 @@ instance CIntRepresentable MMapMode where
         , if mapExecutable gp     then (#const MAP_EXECUTABLE)      else 0
         , if mapFile gp           then (#const MAP_FILE)            else 0
         , if mapFixed gp          then (#const MAP_FIXED)           else 0
+#ifdef MAP_FIXED_NOREPLACE
         , if mapFixedNoreplace gp then (#const MAP_FIXED_NOREPLACE) else 0
+#endif
         , if mapGrowsdown gp      then (#const MAP_GROWSDOWN)       else 0
         , if mapHugetlb gp        then (#const MAP_HUGETLB)         else 0
 #ifdef MAP_HUGE_2MB
@@ -219,7 +225,9 @@ instance CIntRepresentable MMapMode where
         , if mapNoReserve gp      then (#const MAP_NORESERVE)       else 0
         , if mapPopulate gp       then (#const MAP_POPULATE)        else 0
         , if mapStack gp          then (#const MAP_STACK)           else 0
+#ifdef MAP_SYNC
         , if mapSync gp           then (#const MAP_SYNC)            else 0
+#endif
 #ifdef MAP_UNINITIALIZED
         , if mapUninitialized gp  then (#const MAP_UNINITIALIZED)   else 0
 #endif
@@ -238,7 +246,9 @@ instance CIntRepresentable MMapMode where
                    , mapExecutable     = isset (#const MAP_EXECUTABLE)
                    , mapFile           = isset (#const MAP_FILE)
                    , mapFixed          = isset (#const MAP_FIXED)
+#ifdef MAP_FIXED_NOREPLACE
                    , mapFixedNoreplace = isset (#const MAP_FIXED_NOREPLACE)
+#endif
                    , mapGrowsdown      = isset (#const MAP_GROWSDOWN)
                    , mapHugetlb        = isset (#const MAP_HUGETLB)
 #ifdef MAP_HUGE_2MB
@@ -252,7 +262,9 @@ instance CIntRepresentable MMapMode where
                    , mapNoReserve      = isset (#const MAP_NORESERVE)
                    , mapPopulate       = isset (#const MAP_POPULATE)
                    , mapStack          = isset (#const MAP_STACK)
+#ifdef MAP_SYNC
                    , mapSync           = isset (#const MAP_SYNC)
+#endif
 #ifdef MAP_UNINITIALIZED
                    , mapUninitialized  = isset (#const MAP_UNINITIALIZED)
 #endif
@@ -268,7 +280,9 @@ instance CIntRepresentable MMapMode where
           , #const MAP_EXECUTABLE
           , #const MAP_FILE
           , #const MAP_FIXED
+#ifdef MAP_FIXED_NOREPLACE
           , #const MAP_FIXED_NOREPLACE
+#endif
           , #const MAP_GROWSDOWN
           , #const MAP_HUGETLB
 #ifdef MAP_HUGE_2MB
@@ -282,7 +296,9 @@ instance CIntRepresentable MMapMode where
           , #const MAP_NORESERVE
           , #const MAP_POPULATE
           , #const MAP_STACK
+#ifdef MAP_SYNC
           , #const MAP_SYNC
+#endif
 #ifdef MAP_UNINITIALIZED
           , #const MAP_UNINITIALIZED
 #endif

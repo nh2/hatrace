@@ -18,7 +18,8 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (eBADF)
-import           Foreign.Ptr (nullPtr)
+import           Foreign.Ptr (nullPtr, plusPtr)
+import           Foreign.Storable (sizeOf)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
@@ -88,15 +89,18 @@ spec = before_ assertNoChildren $ do
       callProcess "make" ["--quiet", "example-programs-build/segfault"]
       -- Disable core dumps for the test to not litter in the working tree.
       withCoredumpsDisabled $ do
-        -- Note: On some machines, the exit code is 11, on others it's 139 instead.
-        -- We haven't figured out yet what makes that difference.
-        -- 11 is certainly signal SIGSEGV, and usually 128+N indicates "killed by
-        -- signal N", but it's unclear why on some machine, the 128-bit isn't set.
-        -- In particular, I observe this difference even between my laptop and
-        -- my desktop, which run the same OS and same kernel version.
-        -- See also https://github.com/nh2/hatrace/issues/4#issuecomment-475196313
-        -- For now, we just accept both results, but we should really figure out
-        -- what creates this difference.
+        -- Note: Despite disabling core dump files by setting RLIMIT_CORE to 0,
+        -- on some systems, the core dump flag (128) will still be set after a
+        -- crash.
+        --
+        -- This happens when /proc/sys/kernel/core_pattern is set to a value
+        -- that starts with a pipe, triggering the execution of a handling
+        -- program, no matter what value RLIMIT_CORE is set to. We unfortunately
+        -- can change this setting neither only for our processes nor without
+        -- root privileges. We therefore simply ignore the core dump flag if
+        -- present.
+        --
+        -- See also: core(5) - accessible by running `man 5 core`.
         exitCode <- traceForkProcess "example-programs-build/segfault" []
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
@@ -521,47 +525,6 @@ spec = before_ assertNoChildren $ do
               ]
         renameToTmpFileEvents `shouldSatisfy` (not . null)
 
-    describe "symlink" $ do
-      it "seen exactly once for 'ln -s tempfile tempfilesymlink'" $ do
-        tmpFile <- emptySystemTempFile "test-output"
-        let symlinkPath = tmpFile ++ "symlink"
-        argv <- procToArgv "bash" ["-c", "ln -s " ++ tmpFile ++ " " ++ symlinkPath]
-        (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
-            syscallExitDetailsOnlyConduit .| CL.consume
-        exitCode `shouldBe` ExitSuccess
-        let symlinkEvents =
-              [ linkpathBS
-              | (_pid
-                , Right (DetailedSyscallExit_symlink
-                         SyscallExitDetails_symlink
-                         { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }})
-                ) <- events
-                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
-              ]
-        length symlinkEvents `shouldBe` 1
-
-    describe "symlinkat" $ do
-      it "seen exactly once for './symlinkat" $ do
-        callProcess "make" ["--quiet", "example-programs-build/symlinkat"]
-        tmpFile <- emptySystemTempFile "test-output"
-        let symlinkPath = tmpFile ++ "symlink"
-        argv <- procToArgv "example-programs-build/symlinkat" [tmpFile, symlinkPath]
-        (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
-            syscallExitDetailsOnlyConduit .| CL.consume
-        exitCode `shouldBe` ExitSuccess
-        let symlinkEvents =
-              [ linkpathBS
-              | (_pid
-                , Right (DetailedSyscallExit_symlinkat
-                         SyscallExitDetails_symlinkat
-                         { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }})
-                ) <- events
-                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
-              ]
-        length symlinkEvents `shouldBe` 1
-
     describe "pipe" $ do
       it "seen when piping output in bash" $ do
         argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
@@ -656,3 +619,27 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         timeDetails `shouldBe` [(True, Nothing), (True, Just True)]
+
+    describe "brk" $ do
+      it "has correct output after changing program break" $ do
+        let brkCall = "example-programs-build/brk-syscall"
+        callProcess "make" ["--quiet", brkCall]
+        argv <- procToArgv brkCall []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let brkCallAddresses =
+              [ (addr, brkResult)
+              | (_pid
+                , Right (DetailedSyscallExit_brk
+                         SyscallExitDetails_brk
+                         { enterDetail = SyscallEnterDetails_brk{ addr }, brkResult })
+                ) <- events
+              ]
+        brkCallAddresses `shouldSatisfy` ((3 <=) . length)
+        let (initArg, initAddr) = brkCallAddresses !! (length brkCallAddresses - 3)
+        let extAddr = plusPtr initAddr (0x80 * sizeOf initAddr)
+        initArg `shouldBe` nullPtr
+        elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
+        elem (initAddr, initAddr) brkCallAddresses `shouldBe` True

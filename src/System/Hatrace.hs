@@ -67,6 +67,8 @@ module System.Hatrace
   , SyscallExitDetails_symlinkat(..)
   , SyscallEnterDetails_time(..)
   , SyscallExitDetails_time(..)
+  , SyscallEnterDetails_brk(..)
+  , SyscallExitDetails_brk(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -689,6 +691,24 @@ data SyscallExitDetails_mmap = SyscallExitDetails_mmap
   , mappedArea :: Ptr Void
   } deriving (Eq, Ord, Show)
 
+data SyscallEnterDetails_brk = SyscallEnterDetails_brk
+  { addr :: Ptr Void
+  } deriving (Eq, Ord, Show)
+
+
+data SyscallExitDetails_brk = SyscallExitDetails_brk
+  { enterDetail :: SyscallEnterDetails_brk
+  -- | From Linux Programmer's Manual:
+  -- On success, brk() returns zero. On error, -1 is returned, and errno
+  -- is set to ENOMEM. [...] However, the actual Linux system call returns the
+  -- new program break on success. On failure, the system call returns
+  -- the current break. The glibc wrapper function does some work (i.e.,
+  -- checks whether the new break is less than addr) to provide the 0 and
+  -- -1 return values described above.
+  , brkResult :: Ptr Void
+  } deriving (Eq, Ord, Show)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -714,6 +734,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
   | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_time SyscallEnterDetails_time
+  | DetailedSyscallEnter_brk SyscallEnterDetails_brk
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -743,6 +764,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
   | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_time SyscallExitDetails_time
+  | DetailedSyscallExit_brk SyscallExitDetails_brk
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1002,6 +1024,10 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_time $ SyscallEnterDetails_time
       { tloc = tlocPtr
       }
+  Syscall_brk -> do
+    let SyscallArgs{ arg0 = addr } = syscallArgs
+    let addrPtr = word64ToPtr addr
+    pure $ DetailedSyscallEnter_brk $ SyscallEnterDetails_brk { addr = addrPtr }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1163,6 +1189,9 @@ getSyscallExitDetails knownSyscall syscallArgs pid = do
                     , timeResult = fromIntegral result
                     , tlocValue
                     }
+            DetailedSyscallEnter_brk
+              enterDetail@SyscallEnterDetails_brk{} -> do
+                pure $ DetailedSyscallExit_brk $ SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
 
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -1292,6 +1321,9 @@ formatDetailedSyscallEnter = \case
   DetailedSyscallEnter_time
     SyscallEnterDetails_time{ tloc } ->
       "time(" ++ show tloc ++ ")"
+  DetailedSyscallEnter_brk
+    SyscallEnterDetails_brk{ addr } ->
+      "brk(" ++ showPtrOrNull addr ++ ")"
 
   DetailedSyscallEnter_unimplemented syscall syscallArgs ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ")"
@@ -1302,6 +1334,12 @@ foreign import ccall unsafe "string.h strerror" c_strerror :: CInt -> IO (Ptr CC
 -- | Like "Foreign.C.Error"'s @errnoToIOError@, but getting only the string.
 strError :: ERRNO -> IO String
 strError (ERRNO errno) = c_strerror errno >>= peekCString
+
+
+showPtrOrNull :: Ptr a -> String
+showPtrOrNull p
+  | p == nullPtr = "NULL"
+  | otherwise    = show p
 
 
 formatDetailedSyscallExit :: DetailedSyscallExit -> String
@@ -1415,6 +1453,10 @@ formatDetailedSyscallExit = \case
                            , tlocValue
                            } ->
       "time(" ++ show tloc ++ " /* " ++ show tlocValue ++ " */) = " ++ show timeResult
+
+  DetailedSyscallExit_brk
+    SyscallExitDetails_brk{ enterDetail = SyscallEnterDetails_brk{ addr }, brkResult} ->
+      "brk(" ++ showPtrOrNull addr ++ ") = " ++ show brkResult
 
   DetailedSyscallExit_unimplemented syscall syscallArgs result ->
     "unimplemented_syscall_details(" ++ show syscall ++ ", " ++ show syscallArgs ++ ") = " ++ show result
