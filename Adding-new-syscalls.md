@@ -12,13 +12,17 @@ Those two events need different handling because a syscall could fill some data 
 
 Every syscall supported by `hatrace` defines a new record type with its details. These details normally should contain original C arguments and for user convenience also some peeked details like for example `ByteString` value if a syscall takes a `char*` argument. For the syscall `unlink` this type will have name `SyscallEnterDetails_unlink`. This details record should be added as a new constructor `DetailedSyscallEnter_unlink` of the aggregate type `DetailedSyscallEnter`.
 These details get filled in the function `getSyscallEnterDetails` in a case clause corresponding to a syscall. For `unlink` case clause should match `Syscall_unlink`.
-Current output of syscalls is done in `formatDetailedSyscallEnter` so to make `hatrace` output particular syscall details a new case clause should be added there. The clause should use previously created details constructor, in case of `unlink` it will be `DetailedSyscallEnter_unlink`. 
+For proper enter details output formatting one needs to do 2 things:
+* add an instance of type class `SyscallEnterFormatting` for enter details record
+* add a corresponding case of a form `DetailedSyscallEnter_foo details -> syscallEnterToFormatted details` into the function `formatSyscallEnter`
+
+For formatting details see the module `System.Hatrace.Format`
 
 ## Exit details
 
 Just like with enter details every syscall needs its exit details defined. Their main purpose is to store values filled by a syscall alongside with syscall enter details. Exit details need to be defined as a record named `SyscallExitDetails_XXX` where `XXX` is a syscall name, so for `unlink` we'll have `SyscallExitDetails_unlink`. This record will get stored as a field in a new constructor of the `DetailedSyscallExit` data type and for `unlink` such a constructor name will be `DetailedSyscallExit_unlink`.
 In the function `getSyscallExitDetails` these details get filled after matching an enter details constructor.
-Formatting of exit details is done in `formatDetailedSyscallExit`
+Formatting of exit details is done using the type class `SyscallExitFormatting` in `formatDetailedSyscallExit`.
 
 ## Dealing with syscall parameters
 
@@ -34,10 +38,10 @@ So in general to add a new syscall `foo` to `hatrace` one needs to do the follow
     1. Create data type `SyscallEnterDetails_foo`.
     2. Add an entry for it in the type `DetailedSyscallEnter` sum type.
     3. Update `getSyscallEnterDetails` accordingly.
-    4. Update `formatDetailedSyscallEnter` accordingly.
+    4. Add an instance of `SyscallEnterFormatting` and update `formatSyscallEnter` accordingly.
 2. **Exit** details:
     1. Create data type `SyscallExitDetails_foo`.
     2. Add an entry for it the type `DetailedSyscallExit` sum type.
     3. Update `getSyscallExitDetails` accordingly.
-    4. Update `formatDetailedSyscallExit` accordingly.
+    4. Add an instance of `SyscallExitFormatting` and update `formatDetailedSyscallExit` accordingly.
 3. (Optional but highly recommended) Add test(s) for the implemented syscall - see `HatraceSpec` for examples
