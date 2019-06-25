@@ -924,7 +924,7 @@ data SyscallEnterDetails_brk = SyscallEnterDetails_brk
 
 instance SyscallEnterFormatting SyscallEnterDetails_brk where
   syscallEnterToFormatted SyscallEnterDetails_brk{ addr } =
-    FormattedSyscall "symlink" [formatArg addr] -- TODO: fix syscall specific format
+    FormattedSyscall "symlink" [formatArg addr]
 
 
 data SyscallExitDetails_brk = SyscallExitDetails_brk
