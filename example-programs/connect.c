@@ -9,8 +9,8 @@
 #include <arpa/inet.h>
 
 void die_usage(void){
- 	fprintf(stderr, "Usage: connect [FLAG]\n");
- 	exit(1);
+    fprintf(stderr, "Usage: connect [FLAG]\n");
+    exit(1);
 }
 
 void error_connect(void){
@@ -36,8 +36,8 @@ void connectInet6(){
 
 
 void connectInet(){
- 	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
- 	if(sockfd < 0){
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if(sockfd < 0){
         printf("\n Error : Could not create Inet socket \n");
         exit(1);
     }
@@ -50,63 +50,63 @@ void connectInet(){
 }
 
 void connectNetlink(){
-	int sockfd = socket(PF_NETLINK, SOCK_RAW, 0);
-	if(sockfd < 0){
-		printf("\n Error: Could not create netlink socket \n");
-		exit(1);
-	}
-	struct sockaddr_nl addr;
-	addr.nl_family = AF_NETLINK;
+    int sockfd = socket(PF_NETLINK, SOCK_RAW, 0);
+    if(sockfd < 0){
+        printf("\n Error: Could not create netlink socket \n");
+        exit(1);
+    }
+    struct sockaddr_nl addr;
+    addr.nl_family = AF_NETLINK;
     addr.nl_pid = getpid(); /* self pid */
-	if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
+    if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
         error_connect();
     }
-	close(sockfd);
+    close(sockfd);
 }
 
 void connectUnix(){
-	int sockfd = socket(PF_UNIX, SOCK_STREAM, 0);
-	if(sockfd < 0){
-		printf("\n Error: Could not create unix socket \n");
-		exit(1);
-	}
-	struct sockaddr_un addr;
-	memset(&addr, 0, sizeof(struct sockaddr_un));
-	addr.sun_family = AF_UNIX;
-	snprintf(addr.sun_path, UNIX_PATH_MAX, "./demo_socket");
- 	if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
+    int sockfd = socket(PF_UNIX, SOCK_STREAM, 0);
+    if(sockfd < 0){
+        printf("\n Error: Could not create unix socket \n");
+        exit(1);
+    }
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(struct sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    snprintf(addr.sun_path, UNIX_PATH_MAX, "./demo_socket");
+    if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
         error_connect();
     }
 }
 
 void connectPacket(){
-	/* TODO: implement connect call for packet socket */
+    /* TODO: implement connect call for packet socket */
 }
 
 int main(int argc, char const *argv[]){
-	if (argc != 2){
-		die_usage();
-	}
-	int i = atoi(argv[1]);
-	switch(i){
-		case AF_UNIX:
-			connectUnix();
-			break;
-		case AF_INET:
-			connectInet();
-			break;
-		case AF_INET6:
-			connectInet6();
-			break;
-		case AF_PACKET:
-			connectPacket();
-			break;
-		case AF_NETLINK:
-			connectNetlink();
-			break;
-		default:
-			die_usage();
-	}
-	/* code */
-	return 0;
+    if (argc != 2){
+        die_usage();
+    }
+    int i = atoi(argv[1]);
+    switch(i){
+        case AF_UNIX:
+            connectUnix();
+            break;
+        case AF_INET:
+        connectInet();
+            break;
+        case AF_INET6:
+            connectInet6();
+            break;
+        case AF_PACKET:
+            connectPacket();
+            break;
+        case AF_NETLINK:
+            connectNetlink();
+            break;
+        default:
+            die_usage();
+    }
+    /* code */
+    return 0;
 }
