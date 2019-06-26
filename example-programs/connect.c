@@ -125,7 +125,7 @@ int main(int argc, char const *argv[]){
             connectUnix();
             break;
         case AF_INET:
-        connectInet();
+            connectInet();
             break;
         case AF_INET6:
             connectInet6();
