@@ -19,8 +19,8 @@ void error_connect(void){
 }
 
 void connectInet6(){
-	int sockfd = socket(AF_INET6, SOCK_STREAM, 0);
- 	if(sockfd < 0){
+    int sockfd = socket(AF_INET6, SOCK_STREAM, 0);
+    if(sockfd < 0){
         printf("\n Error : Could not create Inet6 socket \n");
         exit(1);
     }
