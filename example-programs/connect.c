@@ -31,7 +31,7 @@ void connectInet6(){
     addr.sin6_port = htons(5000);
     inet_pton(AF_INET6, "::1", &addr.sin6_addr);
     if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
-        error_connect("inet6");
+        // fail silently, since noone is listening.
     }
     close(sockfd);
 }
@@ -46,7 +46,7 @@ void connectInet(){
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
-        error_connect("inet");
+        // fail silently, since noone is listening.
     }
     close(sockfd);
 }
@@ -61,7 +61,7 @@ void connectNetlink(){
     addr.nl_family = AF_NETLINK;
     addr.nl_pid = getpid(); /* self pid */
     if(connect(sockfd, (struct sockaddr *)&addr, sizeof(addr)) != 0){
-        error_connect("netlink");
+        // fail silently, since noone is listening.
     }
     close(sockfd);
 }
