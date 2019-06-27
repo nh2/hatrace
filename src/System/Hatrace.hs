@@ -1405,9 +1405,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                     { enterDetail
                     , timeResult = fromIntegral result
                     }
+
             DetailedSyscallEnter_brk
               enterDetail@SyscallEnterDetails_brk{} -> do
-                pure $ DetailedSyscallExit_brk $ SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
+                pure $ DetailedSyscallExit_brk $
+                  SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
 
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
