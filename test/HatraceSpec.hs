@@ -33,6 +33,7 @@ import           Text.Read (readMaybe)
 import           UnliftIO.Exception (bracket)
 
 import System.Hatrace
+import System.Hatrace.Types
 
 
 -- | Assertion we run before each test to ensure no leftover child processes
@@ -621,3 +622,21 @@ spec = before_ assertNoChildren $ do
         initArg `shouldBe` nullPtr
         elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
         elem (initAddr, initAddr) brkCallAddresses `shouldBe` True
+
+    describe "arch_prctl" $ do
+      it "seen ARCH_GET_FS used by example executable" $ do
+        callProcess "make" ["--quiet", "example-programs-build/get-fs"]
+        argv <- procToArgv "example-programs-build/get-fs" []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let subfunctions =
+              [ subfunction enterDetail
+              | (_pid
+                , Right (DetailedSyscallExit_arch_prctl
+                         SyscallExitDetails_arch_prctl
+                         { enterDetail })
+                ) <- events
+              ]
+        subfunctions `shouldSatisfy` (ArchGetFs `elem`)
