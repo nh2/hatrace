@@ -1,8 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <asm/prctl.h>
+#include <poll.h>
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -11,13 +13,14 @@ module System.Hatrace.Types
   , StatStruct(..)
   , TimespecStruct(..)
   , ArchPrctlSubfunction(..)
+  , PollFdStruct(..)
   , CIntRepresentable(..)
   , SysinfoStruct(..)
   ) where
 
 import           Data.Bits
 import           Data.List (intercalate)
-import           Foreign.C.Types (CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..))
+import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..))
 import           Foreign.Marshal.Array (peekArray, pokeArray)
 import           Foreign.Ptr (plusPtr)
 import           Foreign.Storable (Storable(..))
@@ -27,6 +30,10 @@ import           System.Hatrace.Format
 class CIntRepresentable a where
   toCInt :: a -> CInt
   fromCInt :: CInt -> a
+
+class CShortRepresentable a where
+  toCShort :: a -> CShort
+  fromCShort :: CShort -> a
 
 data FileAccessMode
   = FileAccessKnown GranularAccessMode
@@ -259,3 +266,105 @@ instance Storable SysinfoStruct where
     #{poke struct sysinfo, totalhigh} p totalhigh
     #{poke struct sysinfo, freehigh} p freehigh
     #{poke struct sysinfo, mem_unit} p mem_unit
+
+data PollFdStruct = PollFdStruct
+  { fd      :: CInt
+  , events  :: PollEvents
+  , revents :: PollEvents
+  } deriving (Eq, Ord, Show)
+
+instance Storable PollFdStruct where
+  sizeOf _ = #{size struct pollfd}
+  alignment _ = #{alignment struct pollfd}
+  peek p = do
+    fd <- #{peek struct pollfd, fd} p
+    events <- fromCShort <$> #{peek struct pollfd, events} p
+    revents <- fromCShort <$> #{peek struct pollfd, revents} p
+    return PollFdStruct{ fd = fd
+                       , events = events
+                       , revents = revents
+                       }
+  poke p PollFdStruct{..} = do
+    #{poke struct pollfd, fd} p fd
+    #{poke struct pollfd, events} p (toCShort events)
+    #{poke struct pollfd, revents} p (toCShort revents)
+
+instance ArgFormatting PollFdStruct where
+  formatArg PollFdStruct {..} =
+    StructArg [ ("fd", formatArg fd)
+              , ("events", formatArg events)
+              , ("revents", formatArg revents)
+              ]
+
+data PollEvents = PollEventsKnown GranularPollEvents
+                | PollEventsUnknown CShort deriving (Eq, Ord, Show)
+
+instance ArgFormatting PollEvents where
+  formatArg = FixedStringArg . formatMode
+    where
+      formatMode (PollEventsKnown gpe) =
+        let granularPollEvents =
+              [ "POLLIN" | pollin gpe ] ++
+              [ "POLLPRI" | pollpri gpe ] ++
+              [ "POLLOUT" | pollout gpe ] ++
+#ifdef __USE_GNU
+              [ "POLLRDHUP" | pollrdhup gpe ] ++
+#endif
+              [ "POLLERR" | pollerr gpe ] ++
+              [ "POLLHUP" | pollhup gpe ] ++
+              [ "POLLNVAL" | pollnval gpe ] ++
+              []
+        in if null granularPollEvents then "0" else intercalate "|" granularPollEvents
+      formatMode (PollEventsUnknown x) = show x
+
+data GranularPollEvents = GranularPollEvents
+  { pollin :: Bool
+  , pollpri :: Bool
+  , pollout :: Bool
+#ifdef __USE_GNU
+  , pollrdhup :: Bool
+#endif
+  , pollerr :: Bool
+  , pollhup :: Bool
+  , pollnval :: Bool
+  } deriving (Eq, Ord, Show)
+
+instance CShortRepresentable PollEvents where
+  toCShort (PollEventsKnown gpe) = foldr (.|.) (fromIntegral (0 :: Int)) setBits
+    where
+      setBits =
+        [ if pollin gpe then (#const POLLIN) else 0
+        , if pollpri gpe then (#const POLLPRI) else 0
+        , if pollout gpe then (#const POLLOUT) else 0
+#ifdef __USE_GNU
+        , if pollrdhup gpe then (#const POLLRDHUP) else 0
+#endif
+        , if pollerr gpe then (#const POLLERR) else 0
+        , if pollhup gpe then (#const POLLHUP) else 0
+        , if pollnval gpe then (#const POLLNVAL) else 0
+        ]
+  toCShort (PollEventsUnknown x) = x
+  fromCShort m | (m .&. complement pollEventsBits) /= zeroBits = PollEventsUnknown m
+               | otherwise =
+                  let isset f = (m .&. f) /= zeroBits
+                  in PollEventsKnown GranularPollEvents
+                     { pollin = isset (#const POLLIN)
+                     , pollpri = isset (#const POLLPRI)
+                     , pollout = isset (#const POLLOUT)
+#ifdef __USE_GNU
+                     , pollrdhup = isset (#const POLLRDHUP)
+#endif
+                     , pollerr = isset (#const POLLERR)
+                     , pollhup = isset (#const POLLHUP)
+                     , pollnval = isset (#const POLLNVAL)
+                     }
+    where
+      pollEventsBits = (#const POLLIN)
+                     .|. (#const POLLPRI)
+                     .|. (#const POLLOUT)
+#ifdef __USE_GNU
+                     .|. (#const POLLRDHUP)
+#endif
+                     .|. (#const POLLERR)
+                     .|. (#const POLLHUP)
+                     .|. (#const POLLNVAL)
