@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -69,6 +70,8 @@ module System.Hatrace
   , SyscallExitDetails_time(..)
   , SyscallEnterDetails_brk(..)
   , SyscallExitDetails_brk(..)
+  , SyscallEnterDetails_poll(..)
+  , SyscallExitDetails_poll(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -105,7 +108,9 @@ import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Lazy as BSL
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
-import           Data.Either (partitionEithers)
+import qualified Data.Convertible.Base as Convert
+import qualified Data.Convertible.Instances ()
+import           Data.Either (fromRight, partitionEithers)
 import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -120,8 +125,8 @@ import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import           Foreign.Marshal.Utils (withMany)
-import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr)
-import           Foreign.Storable (peekByteOff, sizeOf)
+import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr, plusPtr)
+import           Foreign.Storable (Storable, peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
@@ -943,6 +948,24 @@ instance SyscallExitFormatting SyscallExitDetails_brk where
   syscallExitToFormatted SyscallExitDetails_brk{ enterDetail, brkResult } =
     (syscallEnterToFormatted enterDetail, formatReturn brkResult)
 
+data SyscallEnterDetails_poll = SyscallEnterDetails_poll
+  { fds :: Ptr PollFdStruct
+  , nfds :: CULong
+  , timeout :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_poll where
+  syscallEnterToFormatted SyscallEnterDetails_poll{ fds, nfds, timeout} =
+    FormattedSyscall "poll" [formatPtrArg "pollfd" fds, formatArg nfds, formatArg timeout]
+
+data SyscallExitDetails_poll = SyscallExitDetails_poll
+  { enterDetail :: SyscallEnterDetails_poll
+  , pollfds :: [PollFdStruct]
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_poll where
+  syscallExitToFormatted SyscallExitDetails_poll{ enterDetail, pollfds } =
+    (syscallEnterToFormatted enterDetail, formatReturn pollfds)
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -969,6 +992,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_time SyscallEnterDetails_time
   | DetailedSyscallEnter_brk SyscallEnterDetails_brk
+  | DetailedSyscallEnter_poll SyscallEnterDetails_poll
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -998,6 +1022,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_time SyscallExitDetails_time
   | DetailedSyscallExit_brk SyscallExitDetails_brk
+  | DetailedSyscallExit_poll SyscallExitDetails_poll
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1250,6 +1275,14 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let SyscallArgs{ arg0 = addr } = syscallArgs
     let addrPtr = word64ToPtr addr
     pure $ DetailedSyscallEnter_brk $ SyscallEnterDetails_brk { addr = addrPtr }
+  Syscall_poll -> do
+    let SyscallArgs{ arg0 = pollfdAddr, arg1 = nfds, arg2 = timeout } = syscallArgs
+    let pollfdPtr = word64ToPtr pollfdAddr
+    pure $ DetailedSyscallEnter_poll $ SyscallEnterDetails_poll
+      { fds = pollfdPtr
+      , nfds = fromIntegral nfds
+      , timeout = fromIntegral timeout
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1405,12 +1438,36 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                     { enterDetail
                     , timeResult = fromIntegral result
                     }
+
             DetailedSyscallEnter_brk
               enterDetail@SyscallEnterDetails_brk{} -> do
                 pure $ DetailedSyscallExit_brk $ SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
 
+            DetailedSyscallEnter_poll
+              enterDetail@SyscallEnterDetails_poll{ fds, nfds } -> do
+                let convertedNfds :: (Convert.ConvertResult Int) = Convert.safeConvert nfds
+                let n = fromRight (maxBound :: Int) convertedNfds
+                pollfds <- System.Hatrace.peekArray (TracedProcess pid) n fds
+                pure $ DetailedSyscallExit_poll $
+                  SyscallExitDetails_poll{ enterDetail, pollfds }
+
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+
+peekArray          :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
+peekArray pid size ptr | size <= 0 = return []
+                       | otherwise = f (size-1) []
+  where
+    f 0 acc = do e <- peekElemOff pid ptr 0; return (e:acc)
+    f n acc = do e <- peekElemOff pid ptr n; f (n-1) (e:acc)
+
+peekElemOff :: Storable a => TracedProcess -> Ptr a -> Int -> IO a
+peekElemOff proc addr offset = do
+  result <- Ptrace.peekBytes proc (addr `plusPtr` (offset * size)) size
+  let (ptr, off, _) = BSI.toForeignPtr result
+  withForeignPtr ptr (\p -> peekByteOff p off)
+  where
+   size = sizeOf addr
 
 readPipeFds :: CPid -> Ptr CInt -> IO (CInt, CInt)
 readPipeFds pid pipefd = do
@@ -1793,6 +1850,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_exit_group details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_poll details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -1881,6 +1940,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_exit details -> formatDetails details
 
     DetailedSyscallExit_exit_group details -> formatDetails details
+
+    DetailedSyscallExit_poll details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result

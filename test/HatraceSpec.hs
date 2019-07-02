@@ -621,3 +621,25 @@ spec = before_ assertNoChildren $ do
         initArg `shouldBe` nullPtr
         elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
         elem (initAddr, initAddr) brkCallAddresses `shouldBe` True
+
+    describe "poll" $ do
+      it "detects correctly all events" $ do
+        let pollCall = "example-programs-build/poll"
+        callProcess "make" ["--quiet", pollCall]
+        tmpFile <- emptySystemTempFile "temp-file"
+        argv <- procToArgv pollCall [tmpFile]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let pollResult = [ (nfds, pollfds)
+                         | (_pid
+                           , Right (DetailedSyscallExit_poll
+                                    SyscallExitDetails_poll
+                                    { enterDetail = SyscallEnterDetails_poll{ nfds }, pollfds })
+                           ) <- events
+                         ]
+        length pollResult `shouldBe` 1
+        let (nfds, pollfds) = head pollResult
+        length pollfds `shouldBe` 3
+        nfds `shouldBe` 3
