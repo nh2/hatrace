@@ -640,3 +640,22 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         subfunctions `shouldSatisfy` (ArchGetFs `elem`)
+
+    describe "set_tid_address" $ do
+      it "seen set_tid_address used by example executable" $ do
+        let progName = "example-programs-build/set-tid-address"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let sets =
+              [ tidptr enterDetail
+              | (_pid
+                , Right (DetailedSyscallExit_set_tid_address
+                         SyscallExitDetails_set_tid_address
+                         { enterDetail })
+                ) <- events
+              ]
+        sets `shouldSatisfy` (not . null)

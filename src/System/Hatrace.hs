@@ -71,6 +71,8 @@ module System.Hatrace
   , SyscallExitDetails_brk(..)
   , SyscallEnterDetails_arch_prctl(..)
   , SyscallExitDetails_arch_prctl(..)
+  , SyscallEnterDetails_set_tid_address(..)
+  , SyscallExitDetails_set_tid_address(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -980,6 +982,25 @@ instance SyscallExitFormatting SyscallExitDetails_arch_prctl where
     where
       SyscallEnterDetails_arch_prctl{ subfunction } = enterDetail
 
+data SyscallEnterDetails_set_tid_address = SyscallEnterDetails_set_tid_address
+  { tidptr :: Ptr CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_set_tid_address where
+  syscallEnterToFormatted SyscallEnterDetails_set_tid_address{ tidptr } =
+    FormattedSyscall "set_tid_address" [formatPtrArg "int" tidptr]
+
+
+data SyscallExitDetails_set_tid_address = SyscallExitDetails_set_tid_address
+  { enterDetail :: SyscallEnterDetails_set_tid_address
+  -- peeked details
+  , tidResult :: CLong
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_set_tid_address where
+  syscallExitToFormatted SyscallExitDetails_set_tid_address{ enterDetail, tidResult } =
+    ( syscallEnterToFormatted enterDetail, formatReturn tidResult )
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -1007,6 +1028,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_time SyscallEnterDetails_time
   | DetailedSyscallEnter_brk SyscallEnterDetails_brk
   | DetailedSyscallEnter_arch_prctl SyscallEnterDetails_arch_prctl
+  | DetailedSyscallEnter_set_tid_address SyscallEnterDetails_set_tid_address
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1037,6 +1059,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_time SyscallExitDetails_time
   | DetailedSyscallExit_brk SyscallExitDetails_brk
   | DetailedSyscallExit_arch_prctl SyscallExitDetails_arch_prctl
+  | DetailedSyscallExit_set_tid_address SyscallExitDetails_set_tid_address
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1302,6 +1325,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , addr = addrArg
       , subfunction
       }
+  Syscall_set_tid_address -> do
+    let SyscallArgs{ arg0 = pidAddr } = syscallArgs
+    let tidptr = word64ToPtr pidAddr
+    pure $ DetailedSyscallEnter_set_tid_address $ SyscallEnterDetails_set_tid_address
+      { tidptr
+      } 
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1470,6 +1499,14 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                   AddrArgPtr ptr -> peek (TracedProcess pid) ptr
                 pure $ DetailedSyscallExit_arch_prctl $
                   SyscallExitDetails_arch_prctl{ enterDetail, addrValue }
+
+            DetailedSyscallEnter_set_tid_address
+              enterDetail@SyscallEnterDetails_set_tid_address{ } -> do
+                pure $ DetailedSyscallExit_set_tid_address $
+                  SyscallExitDetails_set_tid_address
+                    { enterDetail
+                    , tidResult = fromIntegral result
+                    }
 
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -1851,6 +1888,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_arch_prctl details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_set_tid_address details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_execve details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_exit details -> syscallEnterToFormatted details
@@ -1941,6 +1980,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_brk details -> formatDetails details
 
     DetailedSyscallExit_arch_prctl details -> formatDetails details
+
+    DetailedSyscallExit_set_tid_address details -> formatDetails details
 
     DetailedSyscallExit_execve details -> formatDetails details
 
