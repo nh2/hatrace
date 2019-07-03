@@ -621,3 +621,44 @@ spec = before_ assertNoChildren $ do
         initArg `shouldBe` nullPtr
         elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
         elem (initAddr, initAddr) brkCallAddresses `shouldBe` True
+
+    describe "symlink" $ do
+      it "seen exactly once for 'ln -s tempfile tempfilesymlink'" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        let symlinkPath = tmpFile ++ "symlink"
+        argv <- procToArgv "bash" ["-c", "ln -s " ++ tmpFile ++ " " ++ symlinkPath]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let symlinkEvents =
+              [ linkpathBS
+              | (_pid
+                , Right (DetailedSyscallExit_symlink
+                         SyscallExitDetails_symlink
+                         { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }})
+                ) <- events
+                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+              ]
+        length symlinkEvents `shouldBe` 1
+
+    describe "symlinkat" $ do
+      it "seen exactly once for './symlinkat" $ do
+        callProcess "make" ["--quiet", "example-programs-build/symlinkat"]
+        tmpFile <- emptySystemTempFile "test-output"
+        let symlinkPath = tmpFile ++ "symlink"
+        argv <- procToArgv "example-programs-build/symlinkat" [tmpFile, symlinkPath]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let symlinkEvents =
+              [ linkpathBS
+              | (_pid
+                , Right (DetailedSyscallExit_symlinkat
+                         SyscallExitDetails_symlinkat
+                         { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }})
+                ) <- events
+                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+              ]
+        length symlinkEvents `shouldBe` 1
