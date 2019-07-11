@@ -15,13 +15,13 @@ jobs:
             - hatrace-{{ checksum "stack.yaml" }}
       - run:
           name: Resolve/Update Dependencies
-          command: stack --color never setup
+          command: stack --no-terminal setup
       - run:
           name: Run tests
-          command: stack --color never test
+          command: stack --no-terminal test
       - run:
           name: Install executable
-          command: stack --color never install
+          command: stack --no-terminal install
       - save_cache:
           name: Cache Dependencies
           key: hatrace-{{ checksum "stack.yaml" }}-{{ checksum "hatrace.cabal" }}
