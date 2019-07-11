@@ -3,6 +3,8 @@ jobs:
   build:
     docker:
       - image: fpco/stack-build:lts
+    environment:
+      STACK_ARGS: "--no-terminal"
     steps:
       - checkout
       - run: git submodule sync
@@ -15,13 +17,13 @@ jobs:
             - hatrace-{{ checksum "stack.yaml" }}
       - run:
           name: Resolve/Update Dependencies
-          command: stack --no-terminal setup
+          command: stack setup
       - run:
           name: Run tests
-          command: stack --no-terminal test
+          command: stack test
       - run:
           name: Install executable
-          command: stack --no-terminal install
+          command: stack install
       - save_cache:
           name: Cache Dependencies
           key: hatrace-{{ checksum "stack.yaml" }}-{{ checksum "hatrace.cabal" }}
