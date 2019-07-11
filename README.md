@@ -1,3 +1,5 @@
+[![CircleCI](https://circleci.com/gh/nh2/hatrace.svg?style=svg)](https://circleci.com/gh/nh2/hatrace)
+
 # hatrace - scripted `strace`
 
 Includes:
