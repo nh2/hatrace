@@ -7,6 +7,7 @@ jobs:
       - checkout
       - run: git submodule sync
       - run: git submodule update --init
+      - run: sudo apt-get update && sudo apt-get install -y nasm
       - restore_cache:
           # Read about caching dependencies: https://circleci.com/docs/2.0/caching/
           name: Restore Cached Dependencies
