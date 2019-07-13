@@ -13,6 +13,7 @@ import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
 import qualified Data.Map as Map
+import           Data.Maybe (fromMaybe)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -631,14 +632,25 @@ spec = before_ assertNoChildren $ do
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
-        let symlinkEvents =
-              [ linkpathBS
-              | (_pid
-                , Right (DetailedSyscallExit_symlink
-                         SyscallExitDetails_symlink
-                         { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }})
-                ) <- events
-                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+        -- it was observed that on different distros 'ln -s' could use either
+        -- symlink or symlinkat
+        let maybeSymlinkPath exitDetails = case exitDetails of
+              DetailedSyscallExit_symlink
+                SyscallExitDetails_symlink
+                { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }} ->
+                Just linkpathBS
+              DetailedSyscallExit_symlinkat
+                SyscallExitDetails_symlinkat
+                { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }} ->
+                Just linkpathBS
+              _ ->
+                Nothing
+            symlinkEvents =
+              [ exitDetails
+              | (_pid, Right exitDetails) <- events
+              , fromMaybe False $ do
+                  linkpathBS <- maybeSymlinkPath exitDetails
+                  return $ linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
               ]
         length symlinkEvents `shouldBe` 1
 
