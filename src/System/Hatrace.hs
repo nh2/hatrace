@@ -69,6 +69,8 @@ module System.Hatrace
   , SyscallExitDetails_time(..)
   , SyscallEnterDetails_brk(..)
   , SyscallExitDetails_brk(..)
+  , SyscallEnterDetails_arch_prctl(..)
+  , SyscallExitDetails_arch_prctl(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -127,7 +129,7 @@ import           System.Directory (canonicalizePath, doesFileExist, findExecutab
 import           System.Exit (ExitCode(..), die)
 import           System.FilePath ((</>))
 import           System.IO.Error (modifyIOError, ioeGetLocation, ioeSetLocation)
-import           System.Linux.Ptrace (TracedProcess(..), peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
+import           System.Linux.Ptrace (TracedProcess(..), peek, peekBytes, peekNullTerminatedBytes, peekNullWordTerminatedWords, detach)
 import qualified System.Linux.Ptrace as Ptrace
 import           System.Linux.Ptrace.Syscall hiding (ptrace_syscall, ptrace_detach)
 import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
@@ -944,6 +946,43 @@ instance SyscallExitFormatting SyscallExitDetails_brk where
     (syscallEnterToFormatted enterDetail, formatReturn brkResult)
 
 
+data ArchPrctlAddrArg
+  = ArchPrctlAddrArgVal CULong
+  | ArchPrctlAddrArgPtr (Ptr CULong)
+  | ArchPrctlAddrArgUnknown CULong
+  deriving (Eq, Ord, Show)
+
+instance ArgFormatting ArchPrctlAddrArg where
+  formatArg (ArchPrctlAddrArgVal val) = formatArg val
+  formatArg (ArchPrctlAddrArgPtr ptr) = formatPtrArg "unsigned long" ptr
+  formatArg (ArchPrctlAddrArgUnknown val) = formatArg val
+
+data SyscallEnterDetails_arch_prctl = SyscallEnterDetails_arch_prctl
+  { code :: CInt
+  , addr :: ArchPrctlAddrArg
+  -- peeked details
+  , subfunction :: ArchPrctlSubfunction
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_arch_prctl where
+  syscallEnterToFormatted SyscallEnterDetails_arch_prctl{ subfunction, addr } =
+    FormattedSyscall "arch_prctl" [formatArg subfunction, formatArg addr]
+
+
+data SyscallExitDetails_arch_prctl = SyscallExitDetails_arch_prctl
+  { enterDetail :: SyscallEnterDetails_arch_prctl
+  -- peeked details
+  , addrValue :: CULong
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_arch_prctl where
+  syscallExitToFormatted SyscallExitDetails_arch_prctl{ enterDetail, addrValue } =
+    ( FormattedSyscall "arch_prctl" [formatArg subfunction, formatArg addrValue]
+    , NoReturn)
+    where
+      SyscallEnterDetails_arch_prctl{ subfunction } = enterDetail
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -969,6 +1008,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_time SyscallEnterDetails_time
   | DetailedSyscallEnter_brk SyscallEnterDetails_brk
+  | DetailedSyscallEnter_arch_prctl SyscallEnterDetails_arch_prctl
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -998,6 +1038,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_time SyscallExitDetails_time
   | DetailedSyscallExit_brk SyscallExitDetails_brk
+  | DetailedSyscallExit_arch_prctl SyscallExitDetails_arch_prctl
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1250,6 +1291,23 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let SyscallArgs{ arg0 = addr } = syscallArgs
     let addrPtr = word64ToPtr addr
     pure $ DetailedSyscallEnter_brk $ SyscallEnterDetails_brk { addr = addrPtr }
+  Syscall_arch_prctl -> do
+    let SyscallArgs{ arg0 = codeWord, arg1 = addrUnion } = syscallArgs
+    let code = fromIntegral codeWord
+    let subfunction = fromCInt (fromIntegral code)
+    let addrArg =
+          if
+            | subfunction == ArchSetFs || subfunction == ArchSetGs ->
+              ArchPrctlAddrArgVal $ fromIntegral addrUnion
+            | subfunction == ArchGetFs || subfunction == ArchGetGs ->
+              ArchPrctlAddrArgPtr $ word64ToPtr addrUnion
+            | otherwise ->
+              ArchPrctlAddrArgUnknown $ fromIntegral addrUnion
+    pure $ DetailedSyscallEnter_arch_prctl $ SyscallEnterDetails_arch_prctl
+      { code
+      , addr = addrArg
+      , subfunction
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1405,9 +1463,22 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                     { enterDetail
                     , timeResult = fromIntegral result
                     }
+
             DetailedSyscallEnter_brk
               enterDetail@SyscallEnterDetails_brk{} -> do
-                pure $ DetailedSyscallExit_brk $ SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
+                pure $ DetailedSyscallExit_brk $
+                  SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
+
+            DetailedSyscallEnter_arch_prctl
+              enterDetail@SyscallEnterDetails_arch_prctl{ addr } -> do
+                addrValue <- case addr of
+                  ArchPrctlAddrArgVal value -> pure value
+                  ArchPrctlAddrArgPtr ptr -> peek (TracedProcess pid) ptr
+                  -- this shouldn't happen so we don't want to complicate
+                  -- the types because of this improbable scenario
+                  ArchPrctlAddrArgUnknown _ -> pure 0
+                pure $ DetailedSyscallExit_arch_prctl $
+                  SyscallExitDetails_arch_prctl{ enterDetail, addrValue }
 
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -1787,6 +1858,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_brk details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_arch_prctl details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_execve details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_exit details -> syscallEnterToFormatted details
@@ -1875,6 +1948,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_time details -> formatDetails details
 
     DetailedSyscallExit_brk details -> formatDetails details
+
+    DetailedSyscallExit_arch_prctl details -> formatDetails details
 
     DetailedSyscallExit_execve details -> formatDetails details
 
