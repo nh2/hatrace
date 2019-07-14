@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <poll.h>
+#include <asm/prctl.h>
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -11,6 +12,7 @@ module System.Hatrace.Types
   , StatStruct(..)
   , TimespecStruct(..)
   , PollFdStruct(..)
+  , ArchPrctlSubfunction(..)
   , CIntRepresentable(..)
   ) where
 
@@ -268,3 +270,31 @@ instance CShortRepresentable PollEvents where
                      .|. (#const POLLERR)
                      .|. (#const POLLHUP)
                      .|. (#const POLLNVAL)
+
+data ArchPrctlSubfunction
+  = ArchSetFs
+  | ArchGetFs
+  | ArchSetGs
+  | ArchGetGs
+  | ArchUnknownSubfunction CInt
+  deriving (Eq, Ord, Show)
+
+instance CIntRepresentable ArchPrctlSubfunction where
+  toCInt ArchSetFs = (#const ARCH_SET_FS)
+  toCInt ArchGetFs = (#const ARCH_GET_FS)
+  toCInt ArchSetGs = (#const ARCH_SET_GS)
+  toCInt ArchGetGs = (#const ARCH_GET_GS)
+  toCInt (ArchUnknownSubfunction unknown) = unknown
+  fromCInt (#const ARCH_SET_FS) = ArchSetFs
+  fromCInt (#const ARCH_GET_FS) = ArchGetFs
+  fromCInt (#const ARCH_SET_GS) = ArchSetGs
+  fromCInt (#const ARCH_GET_GS) = ArchGetGs
+  fromCInt unknown = ArchUnknownSubfunction unknown
+
+instance ArgFormatting ArchPrctlSubfunction where
+  formatArg ArchSetFs = FixedStringArg "ARCH_SET_FS"
+  formatArg ArchGetFs = FixedStringArg "ARCH_GET_FS"
+  formatArg ArchSetGs = FixedStringArg "ARCH_SET_GS"
+  formatArg ArchGetGs = FixedStringArg "ARCH_GET_GS"
+  formatArg (ArchUnknownSubfunction unknown) =
+    IntegerArg (fromIntegral unknown)

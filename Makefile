@@ -14,6 +14,8 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/atomic-write
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/write-EBADF
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/access-itself
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/trigger-time
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/get-fs
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/set-tid-address
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)

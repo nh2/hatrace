@@ -13,6 +13,7 @@ import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
 import qualified Data.Map as Map
+import           Data.Maybe (fromMaybe)
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -33,6 +34,7 @@ import           Text.Read (readMaybe)
 import           UnliftIO.Exception (bracket)
 
 import System.Hatrace
+import System.Hatrace.Types
 
 
 -- | Assertion we run before each test to ensure no leftover child processes
@@ -622,6 +624,58 @@ spec = before_ assertNoChildren $ do
         elem (extAddr, extAddr) brkCallAddresses `shouldBe` True
         elem (initAddr, initAddr) brkCallAddresses `shouldBe` True
 
+    describe "symlink" $ do
+      it "seen exactly once for 'ln -s tempfile tempfilesymlink'" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        let symlinkPath = tmpFile ++ "symlink"
+        argv <- procToArgv "bash" ["-c", "ln -s " ++ tmpFile ++ " " ++ symlinkPath]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        -- it was observed that on different distros 'ln -s' could use either
+        -- symlink or symlinkat
+        let maybeSymlinkPath exitDetails = case exitDetails of
+              DetailedSyscallExit_symlink
+                SyscallExitDetails_symlink
+                { enterDetail = SyscallEnterDetails_symlink{ linkpathBS }} ->
+                Just linkpathBS
+              DetailedSyscallExit_symlinkat
+                SyscallExitDetails_symlinkat
+                { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }} ->
+                Just linkpathBS
+              _ ->
+                Nothing
+            symlinkEvents =
+              [ exitDetails
+              | (_pid, Right exitDetails) <- events
+              , fromMaybe False $ do
+                  linkpathBS <- maybeSymlinkPath exitDetails
+                  return $ linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+              ]
+        length symlinkEvents `shouldBe` 1
+
+    describe "symlinkat" $ do
+      it "seen exactly once for './symlinkat" $ do
+        callProcess "make" ["--quiet", "example-programs-build/symlinkat"]
+        tmpFile <- emptySystemTempFile "test-output"
+        let symlinkPath = tmpFile ++ "symlink"
+        argv <- procToArgv "example-programs-build/symlinkat" [tmpFile, symlinkPath]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let symlinkEvents =
+              [ linkpathBS
+              | (_pid
+                , Right (DetailedSyscallExit_symlinkat
+                         SyscallExitDetails_symlinkat
+                         { enterDetail = SyscallEnterDetails_symlinkat{ linkpathBS }})
+                ) <- events
+                , linkpathBS == T.encodeUtf8 (T.pack symlinkPath)
+              ]
+        length symlinkEvents `shouldBe` 1
+
     describe "poll" $ do
       it "detects correctly all events" $ do
         let pollCall = "example-programs-build/poll"
@@ -643,3 +697,40 @@ spec = before_ assertNoChildren $ do
         let (nfds, pollfds) = head pollResult
         length pollfds `shouldBe` 3
         nfds `shouldBe` 3
+
+    describe "arch_prctl" $ do
+      it "seen ARCH_GET_FS used by example executable" $ do
+        callProcess "make" ["--quiet", "example-programs-build/get-fs"]
+        argv <- procToArgv "example-programs-build/get-fs" []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let subfunctions =
+              [ subfunction enterDetail
+              | (_pid
+                , Right (DetailedSyscallExit_arch_prctl
+                         SyscallExitDetails_arch_prctl
+                         { enterDetail })
+                ) <- events
+              ]
+        subfunctions `shouldSatisfy` (ArchGetFs `elem`)
+
+    describe "set_tid_address" $ do
+      it "seen set_tid_address used by example executable" $ do
+        let progName = "example-programs-build/set-tid-address"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let sets =
+              [ tidptr enterDetail
+              | (_pid
+                , Right (DetailedSyscallExit_set_tid_address
+                         SyscallExitDetails_set_tid_address
+                         { enterDetail })
+                ) <- events
+              ]
+        sets `shouldSatisfy` (not . null)
