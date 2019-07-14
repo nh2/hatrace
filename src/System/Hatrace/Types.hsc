@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include <asm/prctl.h>
 
 module System.Hatrace.Types
@@ -11,11 +12,14 @@ module System.Hatrace.Types
   , TimespecStruct(..)
   , ArchPrctlSubfunction(..)
   , CIntRepresentable(..)
+  , SysinfoStruct(..)
   ) where
 
 import           Data.Bits
 import           Data.List (intercalate)
-import           Foreign.C.Types (CInt(..), CUInt(..), CLong(..), CULong(..))
+import           Foreign.C.Types (CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..))
+import           Foreign.Marshal.Array (peekArray, pokeArray)
+import           Foreign.Ptr (plusPtr)
 import           Foreign.Storable (Storable(..))
 import           System.Hatrace.Format
 
@@ -189,3 +193,69 @@ instance ArgFormatting ArchPrctlSubfunction where
   formatArg ArchGetGs = FixedStringArg "ARCH_GET_GS"
   formatArg (ArchUnknownSubfunction unknown) =
     IntegerArg (fromIntegral unknown)
+
+data SysinfoStruct = SysinfoStruct
+  { uptime :: CLong -- ^ Seconds since boot
+  , loads_1 :: CULong -- ^ 1 minute load average
+  , loads_5 :: CULong -- ^ 5 minutes load average
+  , loads_15 :: CULong -- ^ 15 minutes load average
+  , totalram :: CULong -- ^ Total usable main memory size
+  , freeram :: CULong -- ^ Available memory size
+  , sharedram :: CULong -- ^ Amount of shared memory
+  , bufferram :: CULong -- ^ Memory used by buffers
+  , totalswap :: CULong -- ^ Total swap space size
+  , freeswap :: CULong -- ^ Swap space still available
+  , procs :: CUShort -- ^ Number of current processes
+  , totalhigh :: CULong -- ^ Total high memory size
+  , freehigh :: CULong -- ^ Available high memory size
+  , mem_unit :: CUInt -- ^ Memory unit size in bytes
+  } deriving (Eq, Ord, Show)
+
+instance ArgFormatting SysinfoStruct where
+  formatArg SysinfoStruct {..} =
+    StructArg
+      [ ("uptime", formatArg uptime)
+      , ("loads", formatArg [loads_1, loads_5, loads_15])
+      , ("totalram", formatArg totalram)
+      , ("freeram", formatArg freeram)
+      , ("sharedram", formatArg sharedram)
+      , ("bufferram", formatArg bufferram)
+      , ("totalswap", formatArg totalswap)
+      , ("freeswap", formatArg freeswap)
+      , ("procs", formatArg procs)
+      , ("totalhigh", formatArg totalhigh)
+      , ("freehigh", formatArg freehigh)
+      , ("mem_unit", formatArg mem_unit)
+      ]
+
+instance Storable SysinfoStruct where
+  sizeOf _ = #{size struct sysinfo}
+  alignment _ = #{alignment struct sysinfo}
+  peek p = do
+    uptime <- #{peek struct sysinfo, uptime   } p
+    loads <- peekArray 3 (#{ptr struct sysinfo, loads} p)
+    let [loads_1, loads_5, loads_15] = loads
+    totalram <- #{peek struct sysinfo, totalram } p
+    freeram <- #{peek struct sysinfo, freeram  } p
+    sharedram <- #{peek struct sysinfo, sharedram} p
+    bufferram <- #{peek struct sysinfo, bufferram} p
+    totalswap <- #{peek struct sysinfo, totalswap} p
+    freeswap <- #{peek struct sysinfo, freeswap } p
+    procs <- #{peek struct sysinfo, procs    } p
+    totalhigh <- #{peek struct sysinfo, totalhigh} p
+    freehigh <- #{peek struct sysinfo, freehigh } p
+    mem_unit <- #{peek struct sysinfo, mem_unit } p
+    return SysinfoStruct{..}
+  poke p SysinfoStruct{..} = do
+    #{poke struct sysinfo, uptime} p uptime
+    pokeArray (#{ptr struct sysinfo, loads} p) [loads_1, loads_5, loads_15]
+    #{poke struct sysinfo, totalram} p totalram
+    #{poke struct sysinfo, freeram} p freeram
+    #{poke struct sysinfo, sharedram} p sharedram
+    #{poke struct sysinfo, bufferram} p bufferram
+    #{poke struct sysinfo, totalswap} p totalswap
+    #{poke struct sysinfo, freeswap} p freeswap
+    #{poke struct sysinfo, procs} p procs
+    #{poke struct sysinfo, totalhigh} p totalhigh
+    #{poke struct sysinfo, freehigh} p freehigh
+    #{poke struct sysinfo, mem_unit} p mem_unit
