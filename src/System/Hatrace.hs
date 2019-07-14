@@ -1595,7 +1595,7 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
-peekArray          :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
+peekArray :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
 peekArray pid size ptr | size <= 0 = return []
                        | otherwise = f (size-1) []
   where
