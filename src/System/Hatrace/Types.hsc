@@ -232,19 +232,19 @@ instance Storable SysinfoStruct where
   sizeOf _ = #{size struct sysinfo}
   alignment _ = #{alignment struct sysinfo}
   peek p = do
-    uptime <- #{peek struct sysinfo, uptime   } p
+    uptime <- #{peek struct sysinfo, uptime} p
     loads <- peekArray 3 (#{ptr struct sysinfo, loads} p)
     let [loads_1, loads_5, loads_15] = loads
-    totalram <- #{peek struct sysinfo, totalram } p
-    freeram <- #{peek struct sysinfo, freeram  } p
+    totalram <- #{peek struct sysinfo, totalram} p
+    freeram <- #{peek struct sysinfo, freeram} p
     sharedram <- #{peek struct sysinfo, sharedram} p
     bufferram <- #{peek struct sysinfo, bufferram} p
     totalswap <- #{peek struct sysinfo, totalswap} p
     freeswap <- #{peek struct sysinfo, freeswap } p
-    procs <- #{peek struct sysinfo, procs    } p
+    procs <- #{peek struct sysinfo, procs} p
     totalhigh <- #{peek struct sysinfo, totalhigh} p
-    freehigh <- #{peek struct sysinfo, freehigh } p
-    mem_unit <- #{peek struct sysinfo, mem_unit } p
+    freehigh <- #{peek struct sysinfo, freehigh} p
+    mem_unit <- #{peek struct sysinfo, mem_unit} p
     return SysinfoStruct{..}
   poke p SysinfoStruct{..} = do
     #{poke struct sysinfo, uptime} p uptime
