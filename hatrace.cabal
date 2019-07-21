@@ -40,7 +40,6 @@ library
                      , bytestring
                      , conduit
                      , containers
-                     , convertible
                      , directory
                      , filepath
                      , linux-ptrace

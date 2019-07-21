@@ -112,9 +112,7 @@ import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Lazy as BSL
 import           Data.Conduit
 import qualified Data.Conduit.List as CL
-import qualified Data.Convertible.Base as Convert
-import qualified Data.Convertible.Instances ()
-import           Data.Either (fromRight, partitionEithers)
+import           Data.Either (partitionEithers)
 import           Data.List (genericLength)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -128,8 +126,9 @@ import           Foreign.C.Types (CInt(..), CLong(..), CULong(..), CChar(..), CS
 import           Foreign.ForeignPtr (withForeignPtr)
 import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
+import qualified Foreign.Marshal.Array (peekArray)
 import           Foreign.Marshal.Utils (withMany)
-import           Foreign.Ptr (Ptr, nullPtr, wordPtrToPtr, plusPtr)
+import           Foreign.Ptr (castPtr, Ptr, nullPtr, wordPtrToPtr, plusPtr)
 import           Foreign.Storable (Storable, peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
@@ -1552,9 +1551,8 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
 
             DetailedSyscallEnter_poll
               enterDetail@SyscallEnterDetails_poll{ fds, nfds } -> do
-                let convertedNfds :: (Convert.ConvertResult Int) = Convert.safeConvert nfds
-                let n = fromRight (maxBound :: Int) convertedNfds
-                pollfds <- System.Hatrace.peekArray (TracedProcess pid) n fds
+                let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+                pollfds <- peekArray (TracedProcess pid) n fds
                 pure $ DetailedSyscallExit_poll $
                   SyscallExitDetails_poll{ enterDetail, pollfds }
 
@@ -1562,19 +1560,14 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
 peekArray :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
-peekArray pid size ptr | size <= 0 = return []
-                       | otherwise = f (size-1) []
-  where
-    f 0 acc = do e <- peekElemOff pid ptr 0; return (e:acc)
-    f n acc = do e <- peekElemOff pid ptr n; f (n-1) (e:acc)
-
-peekElemOff :: Storable a => TracedProcess -> Ptr a -> Int -> IO a
-peekElemOff proc addr offset = do
-  result <- Ptrace.peekBytes proc (addr `plusPtr` (offset * size)) size
-  let (ptr, off, _) = BSI.toForeignPtr result
-  withForeignPtr ptr (\p -> peekByteOff p off)
-  where
-   size = sizeOf addr
+peekArray pid size ptr
+  | size <= 0 = return []
+  | otherwise = do
+      arrayBytes <- Ptrace.peekBytes pid ptr (size * elemSize)
+      let (tmpPtr, _, _) = BSI.toForeignPtr arrayBytes
+      withForeignPtr tmpPtr (\p -> Foreign.Marshal.Array.peekArray size (castPtr p))
+      where
+        elemSize = sizeOf ptr
 
 readPipeFds :: CPid -> Ptr CInt -> IO (CInt, CInt)
 readPipeFds pid pipefd = do
