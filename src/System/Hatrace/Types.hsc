@@ -215,6 +215,12 @@ instance ArgFormatting PollEvents where
               [ "POLLERR" | pollerr gpe ] ++
               [ "POLLHUP" | pollhup gpe ] ++
               [ "POLLNVAL" | pollnval gpe ] ++
+#ifdef _XOPEN_SOURCE
+              [ "POLLRDNORM" | pollrdnorm gpe ] ++
+              [ "POLLRDBAND" | pollrdband gpe ] ++
+              [ "POLLWRNORM" | pollwrnorm gpe ] ++
+              [ "POLLWRBAND" | pollwrband gpe ] ++
+#endif
               []
         in if null granularPollEvents then "0" else intercalate "|" granularPollEvents
       formatMode (PollEventsUnknown x) = show x
@@ -229,6 +235,12 @@ data GranularPollEvents = GranularPollEvents
   , pollerr :: Bool
   , pollhup :: Bool
   , pollnval :: Bool
+#ifdef _XOPEN_SOURCE
+  , pollrdnorm :: Bool
+  , pollrdband :: Bool
+  , pollwrnorm :: Bool
+  , pollwrband :: Bool
+#endif
   } deriving (Eq, Ord, Show)
 
 instance CShortRepresentable PollEvents where
@@ -244,6 +256,12 @@ instance CShortRepresentable PollEvents where
         , if pollerr gpe then (#const POLLERR) else 0
         , if pollhup gpe then (#const POLLHUP) else 0
         , if pollnval gpe then (#const POLLNVAL) else 0
+#ifdef _XOPEN_SOURCE
+        , if pollrdnorm gpe then (#const POLLRDNORM) else 0
+        , if pollrdband gpe then (#const POLLRDBAND) else 0
+        , if pollwrnorm gpe then (#const POLLWRNORM) else 0
+        , if pollwrband gpe then (#const POLLWRBAND) else 0
+#endif
         ]
   toCShort (PollEventsUnknown x) = x
   fromCShort m | (m .&. complement pollEventsBits) /= zeroBits = PollEventsUnknown m
@@ -259,6 +277,12 @@ instance CShortRepresentable PollEvents where
                      , pollerr = isset (#const POLLERR)
                      , pollhup = isset (#const POLLHUP)
                      , pollnval = isset (#const POLLNVAL)
+#ifdef _XOPEN_SOURCE
+                     , pollrdnorm = isset (#const POLLRDNORM)
+                     , pollrdband = isset (#const POLLRDBAND)
+                     , pollwrnorm = isset (#const POLLWRNORM)
+                     , pollwrband = isset (#const POLLWRBAND)
+#endif
                      }
     where
       pollEventsBits = (#const POLLIN)
@@ -270,6 +294,12 @@ instance CShortRepresentable PollEvents where
                      .|. (#const POLLERR)
                      .|. (#const POLLHUP)
                      .|. (#const POLLNVAL)
+#ifdef _XOPEN_SOURCE
+                     .|. (#const POLLRDNORM)
+                     .|. (#const POLLRDBAND)
+                     .|. (#const POLLWRNORM)
+                     .|. (#const POLLWRBAND)
+#endif
 
 data ArchPrctlSubfunction
   = ArchSetFs
