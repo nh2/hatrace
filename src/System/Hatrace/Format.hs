@@ -25,7 +25,7 @@ import qualified Data.Text.Encoding.Error as TE
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Data.Void (Void)
 import           Data.Word (Word64)
-import           Foreign.C.Types (CShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
+import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
 import           Foreign.Ptr (Ptr, nullPtr, ptrToIntPtr)
 import           System.Posix.Types (CMode(..))
 
@@ -58,6 +58,9 @@ instance ArgFormatting Word64 where
   formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CShort where
+  formatArg = IntegerArg . fromIntegral
+
+instance ArgFormatting CUShort where
   formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CInt where

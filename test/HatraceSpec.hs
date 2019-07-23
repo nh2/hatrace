@@ -734,3 +734,22 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         sets `shouldSatisfy` (not . null)
+
+    describe "sysinfo" $ do
+      it "seen sysinfo used by example executable" $ do
+        let progName = "example-programs-build/sysinfo-loads"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let sysinfoDetails =
+              [ enterDetail
+              | (_pid
+                , Right (DetailedSyscallExit_sysinfo
+                         SyscallExitDetails_sysinfo
+                         { enterDetail })
+                ) <- events
+              ]
+        length sysinfoDetails `shouldBe` 1

@@ -76,6 +76,8 @@ module System.Hatrace
   , SyscallExitDetails_arch_prctl(..)
   , SyscallEnterDetails_set_tid_address(..)
   , SyscallExitDetails_set_tid_address(..)
+  , SyscallEnterDetails_sysinfo(..)
+  , SyscallExitDetails_sysinfo(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1026,6 +1028,25 @@ instance SyscallExitFormatting SyscallExitDetails_set_tid_address where
     ( syscallEnterToFormatted enterDetail, formatReturn tidResult )
 
 
+data SyscallEnterDetails_sysinfo = SyscallEnterDetails_sysinfo
+  { info :: Ptr SysinfoStruct
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_sysinfo where
+  syscallEnterToFormatted SyscallEnterDetails_sysinfo{ info } =
+    FormattedSyscall "sysinfo" [formatPtrArg "sysinfo" info]
+
+
+data SyscallExitDetails_sysinfo = SyscallExitDetails_sysinfo
+  { enterDetail :: SyscallEnterDetails_sysinfo
+  , sysinfo :: SysinfoStruct
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_sysinfo where
+  syscallExitToFormatted SyscallExitDetails_sysinfo{ sysinfo } =
+    (FormattedSyscall "sysinfo" [formatArg sysinfo], NoReturn)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1054,6 +1075,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_poll SyscallEnterDetails_poll
   | DetailedSyscallEnter_arch_prctl SyscallEnterDetails_arch_prctl
   | DetailedSyscallEnter_set_tid_address SyscallEnterDetails_set_tid_address
+  | DetailedSyscallEnter_sysinfo SyscallEnterDetails_sysinfo
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1086,6 +1108,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_poll SyscallExitDetails_poll
   | DetailedSyscallExit_arch_prctl SyscallExitDetails_arch_prctl
   | DetailedSyscallExit_set_tid_address SyscallExitDetails_set_tid_address
+  | DetailedSyscallExit_sysinfo SyscallExitDetails_sysinfo
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1363,6 +1386,10 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , addr = addrArg
       , subfunction
       }
+  Syscall_sysinfo -> do
+    let SyscallArgs{ arg0 = infoAddr } = syscallArgs
+    let infoPtr = word64ToPtr infoAddr
+    pure $ DetailedSyscallEnter_sysinfo $ SyscallEnterDetails_sysinfo { info = infoPtr }
   Syscall_set_tid_address -> do
     let SyscallArgs{ arg0 = pidAddr } = syscallArgs
     let tidptr = word64ToPtr pidAddr
@@ -1555,6 +1582,12 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                 pollfds <- peekArray (TracedProcess pid) n fds
                 pure $ DetailedSyscallExit_poll $
                   SyscallExitDetails_poll{ enterDetail, pollfds }
+
+            DetailedSyscallEnter_sysinfo
+              enterDetail@SyscallEnterDetails_sysinfo{ info } -> do
+                sysinfo <- peek (TracedProcess pid) info
+                pure $ DetailedSyscallExit_sysinfo $
+                  SyscallExitDetails_sysinfo{ enterDetail, sysinfo }
 
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -1948,6 +1981,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_set_tid_address details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_sysinfo details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_execve details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_exit details -> syscallEnterToFormatted details
@@ -2042,6 +2077,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_arch_prctl details -> formatDetails details
 
     DetailedSyscallExit_set_tid_address details -> formatDetails details
+
+    DetailedSyscallExit_sysinfo details -> formatDetails details
 
     DetailedSyscallExit_execve details -> formatDetails details
 
