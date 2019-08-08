@@ -75,6 +75,10 @@ module System.Hatrace
   , SyscallExitDetails_set_tid_address(..)
   , SyscallEnterDetails_sysinfo(..)
   , SyscallExitDetails_sysinfo(..)
+  , SyscallEnterDetails_mprotect(..)
+  , SyscallExitDetails_mprotect(..)
+  , SyscallEnterDetails_pkey_mprotect(..)
+  , SyscallExitDetails_pkey_mprotect(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1026,6 +1030,51 @@ instance SyscallExitFormatting SyscallExitDetails_sysinfo where
     (FormattedSyscall "sysinfo" [formatArg sysinfo], NoReturn)
 
 
+data SyscallEnterDetails_mprotect = SyscallEnterDetails_mprotect
+  { addr :: Ptr Void
+  , len :: CSize
+  , prot :: CInt
+  -- Peeked details
+  , protection :: AccessProtection
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_mprotect where
+  syscallEnterToFormatted SyscallEnterDetails_mprotect{ addr, len, prot } =
+    FormattedSyscall "mprotect" [formatArg addr, formatArg len, formatArg prot]
+
+
+data SyscallExitDetails_mprotect = SyscallExitDetails_mprotect
+  { enterDetail :: SyscallEnterDetails_mprotect
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_mprotect where
+  syscallExitToFormatted SyscallExitDetails_mprotect{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
+data SyscallEnterDetails_pkey_mprotect = SyscallEnterDetails_pkey_mprotect
+  { addr :: Ptr Void
+  , len :: CSize
+  , prot :: CInt
+  , pkey :: CInt
+  -- Peeked details
+  , protection :: AccessProtection
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_pkey_mprotect where
+  syscallEnterToFormatted SyscallEnterDetails_pkey_mprotect{ addr, len, prot } =
+    FormattedSyscall "pkey_mprotect" [formatArg addr, formatArg len, formatArg prot]
+
+
+data SyscallExitDetails_pkey_mprotect = SyscallExitDetails_pkey_mprotect
+  { enterDetail :: SyscallEnterDetails_pkey_mprotect
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_pkey_mprotect where
+  syscallExitToFormatted SyscallExitDetails_pkey_mprotect{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1054,6 +1103,8 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_arch_prctl SyscallEnterDetails_arch_prctl
   | DetailedSyscallEnter_set_tid_address SyscallEnterDetails_set_tid_address
   | DetailedSyscallEnter_sysinfo SyscallEnterDetails_sysinfo
+  | DetailedSyscallEnter_mprotect SyscallEnterDetails_mprotect
+  | DetailedSyscallEnter_pkey_mprotect SyscallEnterDetails_pkey_mprotect
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1086,6 +1137,8 @@ data DetailedSyscallExit
   | DetailedSyscallExit_arch_prctl SyscallExitDetails_arch_prctl
   | DetailedSyscallExit_set_tid_address SyscallExitDetails_set_tid_address
   | DetailedSyscallExit_sysinfo SyscallExitDetails_sysinfo
+  | DetailedSyscallExit_mprotect SyscallExitDetails_mprotect
+  | DetailedSyscallExit_pkey_mprotect SyscallExitDetails_pkey_mprotect
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -1365,6 +1418,27 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_set_tid_address $ SyscallEnterDetails_set_tid_address
       { tidptr
       } 
+  Syscall_mprotect -> do
+    let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = protWord } = syscallArgs
+    let addrPtr = word64ToPtr addr
+    let prot = fromIntegral protWord
+    pure $ DetailedSyscallEnter_mprotect $ SyscallEnterDetails_mprotect
+      { addr = addrPtr
+      , len = fromIntegral len
+      , prot = prot
+      , protection = fromCInt prot
+      }
+  Syscall_pkey_mprotect -> do
+    let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = protWord, arg3 = pkey } = syscallArgs
+    let addrPtr = word64ToPtr addr
+    let prot = fromIntegral protWord
+    pure $ DetailedSyscallEnter_pkey_mprotect $ SyscallEnterDetails_pkey_mprotect
+      { addr = addrPtr
+      , len = fromIntegral len
+      , prot = prot
+      , pkey = fromIntegral pkey
+      , protection = fromCInt prot
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 
@@ -1550,6 +1624,16 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                 sysinfo <- peek (TracedProcess pid) info
                 pure $ DetailedSyscallExit_sysinfo $
                   SyscallExitDetails_sysinfo{ enterDetail, sysinfo }
+
+            DetailedSyscallEnter_mprotect
+              enterDetail@SyscallEnterDetails_mprotect{ } -> do
+                pure $ DetailedSyscallExit_mprotect $
+                  SyscallExitDetails_mprotect{ enterDetail }
+
+            DetailedSyscallEnter_pkey_mprotect
+              enterDetail@SyscallEnterDetails_pkey_mprotect{ } -> do
+                pure $ DetailedSyscallExit_pkey_mprotect $
+                  SyscallExitDetails_pkey_mprotect{ enterDetail }
 
             DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
               pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -1935,6 +2019,10 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_sysinfo details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_mprotect details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_pkey_mprotect details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_execve details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_exit details -> syscallEnterToFormatted details
@@ -2029,6 +2117,10 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_set_tid_address details -> formatDetails details
 
     DetailedSyscallExit_sysinfo details -> formatDetails details
+
+    DetailedSyscallExit_mprotect details -> formatDetails details
+
+    DetailedSyscallExit_pkey_mprotect details -> formatDetails details
 
     DetailedSyscallExit_execve details -> formatDetails details
 

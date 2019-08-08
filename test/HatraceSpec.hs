@@ -775,3 +775,24 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         length sysinfoDetails `shouldBe` 1
+
+    describe "mprotect" $ do
+      it "seen mprotect used by example executable" $ do
+        let progName = "example-programs-build/mprotect"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let readAccess = noAccess { accessProtectionRead = True }
+            mprotects =
+              [ protection
+              | (_pid
+                , Right (DetailedSyscallExit_mprotect
+                         SyscallExitDetails_mprotect
+                         { enterDetail = SyscallEnterDetails_mprotect { protection } })
+                ) <- events
+              , protection == AccessProtectionKnown readAccess
+              ]
+        length mprotects `shouldBe` 1

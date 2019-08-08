@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 #include <unistd.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
 #include <asm/prctl.h>
@@ -13,6 +14,9 @@ module System.Hatrace.Types
   , ArchPrctlSubfunction(..)
   , CIntRepresentable(..)
   , SysinfoStruct(..)
+  , AccessProtection(..)
+  , GranularAccessProtection(..)
+  , noAccess
   ) where
 
 import           Data.Bits
@@ -259,3 +263,73 @@ instance Storable SysinfoStruct where
     #{poke struct sysinfo, totalhigh} p totalhigh
     #{poke struct sysinfo, freehigh} p freehigh
     #{poke struct sysinfo, mem_unit} p mem_unit
+
+data AccessProtection
+  = AccessProtectionKnown GranularAccessProtection
+  | AccessProtectionUnknown CInt
+  deriving (Eq, Ord, Show)
+
+-- | PROT_NONE designating no access at all is assumed when all of the
+-- flag below get set to a false value, values PROT_SEM and PROT_SAO
+-- appear to be architecture-specific and not available on X86-64
+data GranularAccessProtection = GranularAccessProtection
+  { accessProtectionRead :: Bool
+  -- ^ PROT_READ  The memory can be read.
+  , accessProtectionWrite :: Bool
+  -- ^ PROT_WRITE The memory can be modified.
+  , accessProtectionExec :: Bool
+  -- ^ PROT_EXEC  The memory can be executed.
+  , accessProtectionGrowsUp :: Bool
+  -- ^ PROT_GROWSUP (since Linux 2.6.0) Apply the protection mode up to the end of
+  -- a mapping that grows upwards.  (Such mappings are created for the stack area
+  -- on architectures — for example, HP-PARISC — that have an upwardly growing stack.)
+  , accessProtectionGrowsDown :: Bool
+  -- ^ PROT_GROWSDOWN (since Linux 2.6.0) Apply the protection mode down to the
+  -- beginning of a mapping that grows downward (which should be a stack  segment
+  -- or a segment mapped with the MAP_GROWSDOWN flag set).
+  } deriving (Eq, Ord, Show)
+
+-- | special access protection not equal to any granular access flags
+-- designating no access ata ll
+noAccess :: GranularAccessProtection
+noAccess = GranularAccessProtection False False False False False
+
+instance ArgFormatting AccessProtection where
+  formatArg = FixedStringArg . formatMode
+    where
+      formatMode (AccessProtectionKnown flags) =
+        let granularFlags = concat
+              [ if accessProtectionRead flags then ["PROT_READ"] else []
+              , if accessProtectionWrite flags then ["PROT_WRITE"] else []
+              , if accessProtectionExec flags then ["PROT_EXEC"] else []
+              , if accessProtectionGrowsUp flags then ["PROT_GROWSUP"] else []
+              , if accessProtectionGrowsDown flags then ["PROT_GROWSDOWN"] else []
+              ]
+        in if null granularFlags then "PROT_NONE" else intercalate "|" granularFlags
+      formatMode (AccessProtectionUnknown x) = show x
+
+instance CIntRepresentable AccessProtection where
+  toCInt (AccessProtectionKnown ga) =
+      r .|. w .|. x .|. up .|. down .|. (#const PROT_NONE)
+    where
+      r = if accessProtectionRead ga then (#const PROT_READ) else 0
+      w = if accessProtectionWrite ga then (#const PROT_WRITE) else 0
+      x = if accessProtectionExec ga then (#const PROT_EXEC) else 0
+      up = if accessProtectionGrowsUp ga then (#const PROT_GROWSUP) else 0
+      down = if accessProtectionGrowsDown ga then (#const PROT_GROWSDOWN) else 0
+  toCInt (AccessProtectionUnknown x) = x
+  fromCInt (#const PROT_NONE) = AccessProtectionKnown noAccess
+  fromCInt m | (m .&. complement accessBits) /= zeroBits = AccessProtectionUnknown m
+             | otherwise =
+                let isset f = (m .&. f) /= zeroBits
+                in AccessProtectionKnown GranularAccessProtection
+                   { accessProtectionRead = isset (#const PROT_READ)
+                   , accessProtectionWrite = isset (#const PROT_WRITE)
+                   , accessProtectionExec = isset (#const PROT_EXEC)
+                   , accessProtectionGrowsUp = isset (#const PROT_GROWSUP)
+                   , accessProtectionGrowsDown = isset (#const PROT_GROWSDOWN)
+                   }
+    where
+      accessBits =
+        (#const PROT_NONE) .|. (#const PROT_READ) .|. (#const PROT_WRITE) .|.
+        (#const PROT_EXEC) .|. (#const PROT_GROWSUP) .|. (#const PROT_GROWSDOWN)
