@@ -323,6 +323,7 @@ instance ArgFormatting PollEvents where
         in if null granularPollEvents then "0" else intercalate "|" granularPollEvents
       formatMode (PollEventsUnknown x) = show x
 
+-- |Only explicitly defined in man pages poll bits are currently used.
 data GranularPollEvents = GranularPollEvents
   { pollin :: Bool
   , pollpri :: Bool
