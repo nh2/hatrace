@@ -18,7 +18,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import           Foreign.C.Error (eBADF)
+import           Foreign.C.Error (Errno(..), eBADF, eCONNRESET)
 import           Foreign.Ptr (nullPtr, plusPtr)
 import           Foreign.Storable (sizeOf)
 import           System.FilePath (takeFileName, takeDirectory)
@@ -380,6 +380,33 @@ spec = before_ assertNoChildren $ do
           sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
         exitCode `shouldBe` ExitSuccess
         Map.lookup tmpFile writes `shouldBe` Just NonatomicWrite
+
+  describe "modifying syscalls" $ do
+
+    let changeWriteSyscallResult errno =
+          awaitForever $ \(pid, exitOrErrno) -> do
+            case exitOrErrno of
+              Left _ -> pure ()
+              Right syscallExit -> case syscallExit of
+                DetailedSyscallExit_write SyscallExitDetails_write{} -> do
+                  liftIO $ setExitedSyscallResult pid errno
+                _ -> pure ()
+
+    it "can change syscall result" $ do
+        let writeCall = "example-programs-build/expect-errno-in-write"
+        callProcess "make" ["--quiet", writeCall]
+        argv <- procToArgv writeCall []
+        let injectedErrno@(Errno expectedReturn) =
+              eCONNRESET
+        -- we don't check events, as we're interested in the actual result of
+        -- the syscall, which should be changed and this change needs to be
+        -- visible in the traced program
+        (exitCode, _) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .|
+            changeWriteSyscallResult (foreignErrnoToERRNO injectedErrno) .|
+            CL.consume
+        exitCode `shouldBe` (ExitFailure $ fromIntegral expectedReturn)
 
   describe "per-syscall tests" $ do
 

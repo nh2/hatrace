@@ -80,6 +80,7 @@ module System.Hatrace
   , ERRNO(..)
   , foreignErrnoToERRNO
   , getSyscallEnterDetails
+  , setExitedSyscallResult
   , syscallEnterDetailsOnlyConduit
   , syscallExitDetailsOnlyConduit
   , FileWriteEvent(..)
@@ -2478,6 +2479,14 @@ getExitedSyscallResult cpid = do
       then (fromIntegral (-1 :: Int), Just $ ERRNO $ fromIntegral (-retVal))
       else (retVal, Nothing)
 
+setExitedSyscallResult :: CPid -> ERRNO -> IO ()
+setExitedSyscallResult cpid (ERRNO errno) = do
+  let newRetVal = -errno
+  regs <- annotatePtrace "setExitedSyscallResult: ptrace_getregs" $ ptrace_getregs cpid
+  let newRegs = case regs of
+        X86 r -> X86 r { eax = fromIntegral newRetVal }
+        X86_64 r -> X86_64 r { rax = fromIntegral newRetVal }
+  annotatePtrace "setExitedSyscallResult: ptrace_setregs" $ ptrace_setregs cpid newRegs
 
 foreign import ccall safe "kill" c_kill :: CPid -> Signal -> IO CInt
 
