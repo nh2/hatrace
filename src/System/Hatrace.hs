@@ -2479,13 +2479,19 @@ getExitedSyscallResult cpid = do
       then (fromIntegral (-1 :: Int), Just $ ERRNO $ fromIntegral (-retVal))
       else (retVal, Nothing)
 
-setExitedSyscallResult :: CPid -> ERRNO -> IO ()
-setExitedSyscallResult cpid (ERRNO errno) = do
-  let newRetVal = -errno
+-- | Changes result of current syscall. Should be called only on exit event.
+-- For 32-bit architectures Word64 type is too large, so only the last 32 bits will be used.
+setExitedSyscallResult :: CPid -> Either ERRNO Word64 -> IO ()
+setExitedSyscallResult cpid errorOrRetValue = do
+  let newRetValue =
+        case errorOrRetValue of
+          Right num -> num
+          Left (ERRNO errno) -> fromIntegral (-errno)
   regs <- annotatePtrace "setExitedSyscallResult: ptrace_getregs" $ ptrace_getregs cpid
-  let newRegs = case regs of
-        X86 r -> X86 r { eax = fromIntegral newRetVal }
-        X86_64 r -> X86_64 r { rax = fromIntegral newRetVal }
+  let newRegs =
+        case regs of
+          X86 r -> X86 r { eax = fromIntegral newRetValue }
+          X86_64 r -> X86_64 r { rax = newRetValue }
   annotatePtrace "setExitedSyscallResult: ptrace_setregs" $ ptrace_setregs cpid newRegs
 
 foreign import ccall safe "kill" c_kill :: CPid -> Signal -> IO CInt
