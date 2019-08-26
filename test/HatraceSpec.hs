@@ -383,17 +383,17 @@ spec = before_ assertNoChildren $ do
 
   describe "modifying syscalls" $ do
 
-    let changeWriteSyscallResult errno =
+    let changeWriteSyscallResult errorOrRetValue =
           awaitForever $ \(pid, exitOrErrno) -> do
             case exitOrErrno of
               Left _ -> pure ()
               Right syscallExit -> case syscallExit of
                 DetailedSyscallExit_write SyscallExitDetails_write{} -> do
-                  liftIO $ setExitedSyscallResult pid errno
+                  liftIO $ setExitedSyscallResult pid errorOrRetValue
                 _ -> pure ()
 
-    it "can change syscall result" $ do
-        let writeCall = "example-programs-build/expect-errno-in-write"
+    it "can change syscall result to any error" $ do
+        let writeCall = "example-programs-build/change-write-result"
         callProcess "make" ["--quiet", writeCall]
         argv <- procToArgv writeCall []
         let injectedErrno@(Errno expectedReturn) =
@@ -404,9 +404,26 @@ spec = before_ assertNoChildren $ do
         (exitCode, _) <-
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .|
-            changeWriteSyscallResult (foreignErrnoToERRNO injectedErrno) .|
+            changeWriteSyscallResult (Left $ foreignErrnoToERRNO injectedErrno) .|
             CL.consume
         exitCode `shouldBe` (ExitFailure $ fromIntegral expectedReturn)
+
+    it "can change syscall result to any return value" $ do
+        let writeCall = "example-programs-build/change-write-result"
+        callProcess "make" ["--quiet", writeCall]
+        argv <- procToArgv writeCall []
+        -- this value below should fit into 8 bits, as exit() does not return
+        -- more bits to the parent
+        let newRetValue = 67
+        -- we don't check events, as we're interested in the actual result of
+        -- the syscall, which should be changed and this change needs to be
+        -- visible in the traced program
+        (exitCode, _) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .|
+            changeWriteSyscallResult (Right $ fromIntegral newRetValue) .|
+            CL.consume
+        exitCode `shouldBe` (ExitFailure newRetValue)
 
   describe "per-syscall tests" $ do
 
