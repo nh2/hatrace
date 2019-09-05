@@ -19,7 +19,7 @@ Includes:
   * Kill your build tool at the 3rd `write()` syscall to an `.o` file, checking whether it will recover from that in the next run.
 * **Testing**
   * Write test suites that assert how your code uses system calls, for correctness or performance.
-  * Mock syscalls to test how your program would behave in situations that are difficult to create in the real world.
+  * Mock syscalls to test how your program would behave in situations that are difficult to create in the real world, for example [veryfing fault-tolerance in specific scenarios](https://tgrez.github.io/posts/2019-09-04-simulate-network-failures.html)
   * Implement anomaly test suites [like `sqlite` does](https://www.sqlite.org/testing.html#i_o_error_testing), exhaustively testing whether your program can recover from a crash in _any_ syscall.
 * **Fuzzing**
   * Insert garbage data into the program by changing syscall results or directly changing its memory contents.
