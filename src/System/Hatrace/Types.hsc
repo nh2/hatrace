@@ -110,7 +110,7 @@ instance ArgFormatting MemoryProtectMode where
   formatArg = FixedStringArg . formatMode
     where
       formatMode (MemoryProtectKnown mode) =
-        let granularModes = concat 
+        let granularModes = concat
               [ if protectModeExec  mode then ["PROT_EXEC"]  else []
               , if protectModeRead  mode then ["PROT_READ"]  else []
               , if protectModeWrite mode then ["PROT_WRITE"] else []
@@ -159,38 +159,54 @@ instance ArgFormatting MMapMode where
               [ case mapSharing mode of
                   MMapShared -> ["MAP_SHARED"]
                   MMapPrivate -> ["MAP_PRIVATE"]
+#ifdef MAP_SHARED_VALIDATE
                   MMapSharedValidate -> ["MAP_SHARED_VALIDATE"]
+#endif
               , if map32Bit mode          then ["MAP_32BIT"]           else []
               , if mapAnonymous mode      then ["MAP_ANONYMOUS"]       else []
               , if mapDenyWrite mode      then ["MAP_DENYWRITE"]       else []
               , if mapExecutable mode     then ["MAP_EXECUTABLE"]      else []
               , if mapFixed mode          then ["MAP_FIXED"]           else []
+#ifdef MAP_FIXED_NOREPLACE
               , if mapFixedNoreplace mode then ["MAP_FIXED_NOREPLACE"] else []
+#endif
               , if mapGrowsdown mode      then ["MAP_GROWSDOWN"]       else []
               , if mapHugetlb mode        then ["MAP_HUGETLB"]         else []
- #ifdef MAP_HUGE_2MB
+#ifdef MAP_HUGE_2MB
               , if mapHuge2Mb mode        then ["MAP_HUGE_2MB"]        else []
- #endif
- #ifdef MAP_HUGE_1GB
+#endif
+#ifdef MAP_HUGE_1GB
               , if mapHuge1Gb mode        then ["MAP_HUGE_1GB"]        else []
- #endif
+#endif
               , if mapLocked mode         then ["MAP_LOCKED"]          else []
               , if mapNonblock mode       then ["MAP_NONBLOCK"]        else []
               , if mapNoReserve mode      then ["MAP_NORESERVE"]       else []
               , if mapPopulate mode       then ["MAP_POPULATE"]        else []
               , if mapStack mode          then ["MAP_STACK"]           else []
+#ifdef MAP_SYNC
               , if mapSync mode           then ["MAP_SYNC"]            else []
- #ifdef MAP_UNINITIALIZED
+#endif
+#ifdef MAP_UNINITIALIZED
               , if mapUninitialized mode  then ["MAP_UNINITIALIZED"]   else []
- #endif
+#endif
               ]
         in if null granularModes then "0" else intercalate "|" granularModes
       formatMode (MMapModeUnknown x) = show x
 
 data MMapSharing
   = MMapShared
+  -- ^ Share this mapping.
   | MMapPrivate
+  -- ^ Create a private copy-on-write mapping.
+#ifdef MAP_SHARED_VALIDATE
   | MMapSharedValidate
+  -- ^ This flag provides the same behavior as MAP_SHARED except that MMapShared
+  -- mappings ignore unknown flags in flags. By contrast, when creating a mapping
+  -- using MMapSharedValidate, the kernel verifies all passed flags are known and
+  -- fails the mapping with the error EOPNOTSUPP for unknown flags. This mapping
+  -- type is also required to be able to use some mapping flags (e.g., mapSync).
+  -- (since Linux 4.15)
+#endif
   deriving (Eq, Ord, Show)
 
 -- | mmap mode, MAP_FILE and MAP_EXECUTABLE are ignored on Linux
@@ -201,7 +217,10 @@ data GranularMMapMode = GranularMMapMode
   , mapDenyWrite :: Bool
   , mapExecutable :: Bool
   , mapFixed :: Bool
+#ifdef MAP_FIXED_NOREPLACE
   , mapFixedNoreplace :: Bool
+    -- ^ since Linux 4.17
+#endif
   , mapGrowsdown :: Bool
   , mapHugetlb :: Bool
 #ifdef MAP_HUGE_2MB
@@ -215,7 +234,10 @@ data GranularMMapMode = GranularMMapMode
   , mapNoReserve :: Bool
   , mapPopulate :: Bool
   , mapStack :: Bool
+#ifdef MAP_SYNC
   , mapSync :: Bool
+    -- ^ since Linux 4.15
+#endif
 #ifdef MAP_UNINITIALIZED
   , mapUninitialized :: Bool
 #endif
@@ -228,13 +250,17 @@ instance CIntRepresentable MMapMode where
         [ case mapSharing gp of
             MMapShared -> (#const MAP_SHARED)
             MMapPrivate -> (#const MAP_PRIVATE)
+#ifdef MAP_SHARED_VALIDATE
             MMapSharedValidate -> (#const MAP_SHARED_VALIDATE)
+#endif
         , if map32Bit gp          then (#const MAP_32BIT)           else 0
         , if mapAnonymous gp      then (#const MAP_ANONYMOUS)       else 0
         , if mapDenyWrite gp      then (#const MAP_DENYWRITE)       else 0
         , if mapExecutable gp     then (#const MAP_EXECUTABLE)      else 0
         , if mapFixed gp          then (#const MAP_FIXED)           else 0
+#ifdef MAP_FIXED_NOREPLACE
         , if mapFixedNoreplace gp then (#const MAP_FIXED_NOREPLACE) else 0
+#endif
         , if mapGrowsdown gp      then (#const MAP_GROWSDOWN)       else 0
         , if mapHugetlb gp        then (#const MAP_HUGETLB)         else 0
 #ifdef MAP_HUGE_2MB
@@ -248,7 +274,9 @@ instance CIntRepresentable MMapMode where
         , if mapNoReserve gp      then (#const MAP_NORESERVE)       else 0
         , if mapPopulate gp       then (#const MAP_POPULATE)        else 0
         , if mapStack gp          then (#const MAP_STACK)           else 0
+#ifdef MAP_SYNC
         , if mapSync gp           then (#const MAP_SYNC)            else 0
+#endif
 #ifdef MAP_UNINITIALIZED
         , if mapUninitialized gp  then (#const MAP_UNINITIALIZED)   else 0
 #endif
@@ -259,9 +287,11 @@ instance CIntRepresentable MMapMode where
                 let isset f = (m .&. f) == f
                 in MMapModeKnown GranularMMapMode
                    { mapSharing        =
+#ifdef MAP_SHARED_VALIDATE
                        if isset (#const MAP_SHARED_VALIDATE)
                        then MMapSharedValidate
                        else
+#endif
                          if isset (#const MAP_SHARED)
                          then MMapShared
                          else
@@ -273,7 +303,9 @@ instance CIntRepresentable MMapMode where
                    , mapDenyWrite      = isset (#const MAP_DENYWRITE)
                    , mapExecutable     = isset (#const MAP_EXECUTABLE)
                    , mapFixed          = isset (#const MAP_FIXED)
+#ifdef MAP_FIXED_NOREPLACE
                    , mapFixedNoreplace = isset (#const MAP_FIXED_NOREPLACE)
+#endif
                    , mapGrowsdown      = isset (#const MAP_GROWSDOWN)
                    , mapHugetlb        = isset (#const MAP_HUGETLB)
 #ifdef MAP_HUGE_2MB
@@ -287,7 +319,9 @@ instance CIntRepresentable MMapMode where
                    , mapNoReserve      = isset (#const MAP_NORESERVE)
                    , mapPopulate       = isset (#const MAP_POPULATE)
                    , mapStack          = isset (#const MAP_STACK)
+#ifdef MAP_SYNC
                    , mapSync           = isset (#const MAP_SYNC)
+#endif
 #ifdef MAP_UNINITIALIZED
                    , mapUninitialized  = isset (#const MAP_UNINITIALIZED)
 #endif
@@ -295,7 +329,9 @@ instance CIntRepresentable MMapMode where
     where
         mapBits = foldr (.|.) (fromIntegral (0 :: Int)) $
           [ #const MAP_SHARED
+#ifdef MAP_SHARED_VALIDATE
           , #const MAP_SHARED_VALIDATE
+#endif
           , #const MAP_PRIVATE
           , #const MAP_32BIT
           , #const MAP_ANON
@@ -304,7 +340,9 @@ instance CIntRepresentable MMapMode where
           , #const MAP_EXECUTABLE
           , #const MAP_FILE
           , #const MAP_FIXED
+#ifdef MAP_FIXED_NOREPLACE
           , #const MAP_FIXED_NOREPLACE
+#endif
           , #const MAP_GROWSDOWN
           , #const MAP_HUGETLB
 #ifdef MAP_HUGE_2MB
@@ -318,7 +356,9 @@ instance CIntRepresentable MMapMode where
           , #const MAP_NORESERVE
           , #const MAP_POPULATE
           , #const MAP_STACK
+#ifdef MAP_SYNC
           , #const MAP_SYNC
+#endif
 #ifdef MAP_UNINITIALIZED
           , #const MAP_UNINITIALIZED
 #endif
