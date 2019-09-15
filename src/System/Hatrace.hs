@@ -63,6 +63,8 @@ module System.Hatrace
   , SyscallExitDetails_exit_group(..)
   , SyscallEnterDetails_mmap(..)
   , SyscallExitDetails_mmap(..)
+  , SyscallEnterDetails_munmap(..)
+  , SyscallExitDetails_munmap(..)
   , SyscallEnterDetails_symlink(..)
   , SyscallExitDetails_symlink(..)
   , SyscallEnterDetails_symlinkat(..)
@@ -1105,6 +1107,26 @@ instance SyscallExitFormatting SyscallExitDetails_mmap where
     , formatReturn mappedArea)
 
 
+data SyscallEnterDetails_munmap = SyscallEnterDetails_munmap
+  { addr :: Ptr Void
+  , len :: CSize
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallEnterFormatting SyscallEnterDetails_munmap where
+  syscallEnterToFormatted SyscallEnterDetails_munmap{ addr, len } =
+    FormattedSyscall "munmap" [ formatArg addr, formatArg len ]
+
+
+data SyscallExitDetails_munmap = SyscallExitDetails_munmap
+  { enterDetail :: SyscallEnterDetails_munmap
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_munmap where
+  syscallExitToFormatted SyscallExitDetails_munmap{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1127,6 +1149,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_exit SyscallEnterDetails_exit
   | DetailedSyscallEnter_exit_group SyscallEnterDetails_exit_group
   | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
+  | DetailedSyscallEnter_munmap SyscallEnterDetails_munmap
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
   | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_time SyscallEnterDetails_time
@@ -1162,6 +1185,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_exit SyscallExitDetails_exit
   | DetailedSyscallExit_exit_group SyscallExitDetails_exit_group
   | DetailedSyscallExit_mmap SyscallExitDetails_mmap
+  | DetailedSyscallExit_munmap SyscallExitDetails_munmap
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
   | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_time SyscallExitDetails_time
@@ -1399,6 +1423,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , fd = fromIntegral fd
       , offset = fromIntegral offset
       }
+  Syscall_munmap -> do
+    let SyscallArgs{ arg0 = addr, arg1 = len } = syscallArgs
+    let addrPtr = word64ToPtr addr
+    pure $ DetailedSyscallEnter_munmap $ SyscallEnterDetails_munmap
+      { addr = addrPtr
+      , len = fromIntegral len
+      }
   Syscall_symlink -> do
     let SyscallArgs{ arg0 = targetAddr, arg1 = linkpathAddr } = syscallArgs
     let targetPtr = word64ToPtr targetAddr
@@ -1624,6 +1655,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
               enterDetail@SyscallEnterDetails_mmap{} -> do
                 pure $ DetailedSyscallExit_mmap $
                     SyscallExitDetails_mmap{ enterDetail, mappedArea = word64ToPtr result }
+
+            DetailedSyscallEnter_munmap
+              enterDetail@SyscallEnterDetails_munmap{} -> do
+                pure $ DetailedSyscallExit_munmap $
+                    SyscallExitDetails_munmap{ enterDetail }
 
             DetailedSyscallEnter_symlink
               enterDetail@SyscallEnterDetails_symlink{} -> do
@@ -2055,6 +2091,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_mmap details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_munmap details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_symlink details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_symlinkat details -> syscallEnterToFormatted details
@@ -2155,6 +2193,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_newfstatat details -> formatDetails details
 
     DetailedSyscallExit_mmap details -> formatDetails details
+
+    DetailedSyscallExit_munmap details -> formatDetails details
 
     DetailedSyscallExit_symlink details -> formatDetails details
 

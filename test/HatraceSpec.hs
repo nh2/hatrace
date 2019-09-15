@@ -651,6 +651,26 @@ spec = before_ assertNoChildren $ do
         formatArg flags `shouldBe` FixedStringArg "MAP_SHARED"
         offset `shouldBe` fromIntegral (0 :: Int)
 
+    describe "munmap" $ do
+      it "sees called by mmap-syscall executable" $ do
+        let mmapSyscall = "example-programs-build/mmap-syscall"
+        callProcess "make" ["--quiet", mmapSyscall]
+        argv <- procToArgv mmapSyscall []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let munmapArguments =
+              [ enterDetail (exitDetails :: SyscallExitDetails_munmap)
+              | (_pid
+                , Right (DetailedSyscallExit_munmap
+                         exitDetails)
+                ) <- events
+              ]
+        let SyscallEnterDetails_munmap{addr, len} = last munmapArguments
+        addr `shouldNotBe` nullPtr
+        len `shouldBe` fromIntegral (100 :: Int)
+
     describe "time" $ do
       it "seen called by trigger-time executable" $ do
         callProcess "make" ["--quiet", "example-programs-build/trigger-time"]
