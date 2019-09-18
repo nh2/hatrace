@@ -2,6 +2,8 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE LambdaCase #-}
 
 module HatraceSpec where
 
@@ -696,6 +698,12 @@ spec = before_ assertNoChildren $ do
         length pollResult `shouldBe` 1
         let (nfds, pollfds) = head pollResult
         length pollfds `shouldBe` 3
+#ifdef _GNU_SOURCE
+        System.Hatrace.Types.events (head pollfds) `shouldSatisfy` ( \case
+                                                  PollEventsKnown gpe -> pollrdhup gpe
+                                                  _ -> False
+                                              )
+#endif
         nfds `shouldBe` 3
 
     describe "arch_prctl" $ do

@@ -52,6 +52,8 @@ library
                      , unix
                      , unliftio
                      , unliftio-core
+  if os(linux)
+    cpp-options:         -D_GNU_SOURCE
   ghc-options:         -Wall
   default-language:    Haskell2010
 
@@ -83,6 +85,8 @@ test-suite hatrace-test
                      , unliftio
                      , unliftio-core
   ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N
+  if os(linux)
+    cpp-options:         -D_GNU_SOURCE
   default-language:    Haskell2010
 
 source-repository head
