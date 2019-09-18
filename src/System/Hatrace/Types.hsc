@@ -14,6 +14,8 @@ module System.Hatrace.Types
   , TimespecStruct(..)
   , ArchPrctlSubfunction(..)
   , PollFdStruct(..)
+  , PollEvents(..)
+  , GranularPollEvents(..)
   , CIntRepresentable(..)
   , SysinfoStruct(..)
   ) where
