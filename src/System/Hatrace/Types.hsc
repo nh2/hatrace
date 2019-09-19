@@ -1,5 +1,12 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+
+-- To use `POLLRDHUP` with glibc, `_GNU_SOURCE` must be defined
+-- before any header file imports; see `man 2 poll`.
+#ifdef USE_POLL_POLLRDHUP
+#define _GNU_SOURCE
+#endif
+
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
@@ -309,7 +316,7 @@ instance ArgFormatting PollEvents where
               [ "POLLIN" | pollin gpe ] ++
               [ "POLLPRI" | pollpri gpe ] ++
               [ "POLLOUT" | pollout gpe ] ++
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
               [ "POLLRDHUP" | pollrdhup gpe ] ++
 #endif
               [ "POLLERR" | pollerr gpe ] ++
@@ -330,7 +337,7 @@ data GranularPollEvents = GranularPollEvents
   { pollin :: Bool
   , pollpri :: Bool
   , pollout :: Bool
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
   , pollrdhup :: Bool
 #endif
   , pollerr :: Bool
@@ -351,7 +358,7 @@ instance CShortRepresentable PollEvents where
         [ if pollin gpe then (#const POLLIN) else 0
         , if pollpri gpe then (#const POLLPRI) else 0
         , if pollout gpe then (#const POLLOUT) else 0
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
         , if pollrdhup gpe then (#const POLLRDHUP) else 0
 #endif
         , if pollerr gpe then (#const POLLERR) else 0
@@ -372,7 +379,7 @@ instance CShortRepresentable PollEvents where
                      { pollin = isset (#const POLLIN)
                      , pollpri = isset (#const POLLPRI)
                      , pollout = isset (#const POLLOUT)
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
                      , pollrdhup = isset (#const POLLRDHUP)
 #endif
                      , pollerr = isset (#const POLLERR)
@@ -389,7 +396,7 @@ instance CShortRepresentable PollEvents where
       pollEventsBits = (#const POLLIN)
                      .|. (#const POLLPRI)
                      .|. (#const POLLOUT)
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
                      .|. (#const POLLRDHUP)
 #endif
                      .|. (#const POLLERR)
