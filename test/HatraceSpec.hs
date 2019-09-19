@@ -742,7 +742,7 @@ spec = before_ assertNoChildren $ do
         length pollResult `shouldBe` 1
         let (nfds, pollfds) = head pollResult
         length pollfds `shouldBe` 3
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
         System.Hatrace.Types.events (head pollfds) `shouldSatisfy` ( \case
                                                   PollEventsKnown gpe -> pollrdhup gpe
                                                   _ -> False

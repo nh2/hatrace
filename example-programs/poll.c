@@ -1,6 +1,11 @@
 #ifdef __linux__
+#define USE_POLL_POLLRDHUP
+#endif
+
+#ifdef USE_POLL_POLLRDHUP
 #define _GNU_SOURCE
 #endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -30,7 +35,7 @@ int main (int argc, char const *argv[]) {
 
   /* watch stdout for ability to write */
   fds[0].fd = STDOUT_FILENO;
-#ifdef _GNU_SOURCE
+#ifdef USE_POLL_POLLRDHUP
   fds[0].events = POLLHUP | POLLOUT | POLLIN | POLLRDHUP;
 #else
   fds[0].events = POLLHUP | POLLOUT | POLLIN;
