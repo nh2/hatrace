@@ -160,7 +160,7 @@ import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.Format
-import           System.Hatrace.SignalMap (signalMap)
+import           System.Hatrace.Signals (signalMap)
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
 

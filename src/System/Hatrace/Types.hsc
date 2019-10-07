@@ -45,7 +45,7 @@ import           Foreign.Ptr (plusPtr, castPtr)
 import           Foreign.ForeignPtr (withForeignPtr, newForeignPtr_)
 import           Foreign.Storable (Storable(..))
 import qualified System.Posix.Signals as Signals hiding (inSignalSet)
-import           System.Hatrace.SignalMap
+import           System.Hatrace.Signals
 import           System.Hatrace.Format
 
 -- | Helper type class for int-sized enum-like types

@@ -30,7 +30,7 @@ library
   exposed-modules:     System.Hatrace
                        System.Hatrace.Format
                        System.Hatrace.Main
-                       System.Hatrace.SignalMap
+                       System.Hatrace.Signals
                        System.Hatrace.SyscallTables
                        System.Hatrace.SyscallTables.Generated
                        System.Hatrace.SyscallTables.Util

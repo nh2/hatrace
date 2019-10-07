@@ -5,7 +5,7 @@
 -- whether specific signals are supported on the current platform.
 #include <HsUnixConfig.h>
 
-module System.Hatrace.SignalMap
+module System.Hatrace.Signals
   ( allSignals
   , addSignal
   , emptySignalSet
