@@ -29,7 +29,7 @@ import           System.Exit
 import           System.IO.Temp (emptySystemTempFile)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
-import           System.Posix.Signals (sigTERM)
+import           System.Posix.Signals (sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
 import           System.Process (callProcess, readProcess)
 import           Test.Hspec
 import           Text.Read (readMaybe)
@@ -749,6 +749,29 @@ spec = before_ assertNoChildren $ do
                                               )
 #endif
         nfds `shouldBe` 3
+
+#ifdef USE_POLLING_WITH_SIGMASK
+    describe "ppoll" $ do
+      it "detects correctly all events and sigmask" $ do
+        let pollCall = "example-programs-build/ppoll"
+        callProcess "make" ["--quiet", pollCall]
+        tmpFile <- emptySystemTempFile "temp-file"
+        argv <- procToArgv pollCall [tmpFile]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let pollResult = [ (pollfds, sigmask)
+                         | (_pid
+                           , Right (DetailedSyscallExit_ppoll
+                                    SyscallExitDetails_ppoll{ pollfds, sigmask })
+                           ) <- events
+                         ]
+        length pollResult `shouldBe` 1
+        let (pollfds, SigSet sigmask) = head pollResult
+        length pollfds `shouldBe` 3
+        sigmask `shouldContain` [sigINT, sigQUIT, sigKILL, sigUSR1, sigSYS]
+#endif
 
     describe "arch_prctl" $ do
       it "seen ARCH_GET_FS used by example executable" $ do
