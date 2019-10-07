@@ -13,6 +13,7 @@
 #include <sys/sysinfo.h>
 #include <asm/prctl.h>
 #include <poll.h>
+#include <signal.h>
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
@@ -33,14 +34,22 @@ module System.Hatrace.Types
   , AccessProtection(..)
   , GranularAccessProtection(..)
   , noAccess
+  , SigSet(..)
   ) where
 
+import           Control.Monad (filterM)
 import           Data.Bits
 import           Data.List (intercalate)
+import           Data.Map (lookup)
+import           Data.Maybe (catMaybes)
 import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..))
+import           Foreign.Marshal (copyBytes)
 import           Foreign.Marshal.Array (peekArray, pokeArray)
-import           Foreign.Ptr (plusPtr)
+import           Foreign.Ptr (plusPtr, castPtr)
+import           Foreign.ForeignPtr (withForeignPtr, newForeignPtr_)
 import           Foreign.Storable (Storable(..))
+import qualified System.Posix.Signals as Signals hiding (inSignalSet)
+import           System.Hatrace.Signals
 import           System.Hatrace.Format
 
 -- | Helper type class for int-sized enum-like types
@@ -755,3 +764,26 @@ instance CIntRepresentable AccessProtection where
       accessBits =
         (#const PROT_NONE) .|. (#const PROT_READ) .|. (#const PROT_WRITE) .|.
         (#const PROT_EXEC) .|. (#const PROT_GROWSUP) .|. (#const PROT_GROWSDOWN)
+
+newtype SigSet
+  = SigSet [Signals.Signal]
+  deriving (Eq, Ord, Show)
+
+instance Storable SigSet where
+  sizeOf _ = sizeOfCSigset
+  alignment _ = alignment (undefined :: CULong)
+  peek p = do
+    sigsetPtr <- newForeignPtr_ $ castPtr p
+    SigSet <$> filterM (flip inSignalSet sigsetPtr) allSignals
+  poke ptr (SigSet signals) = do
+    let targetPtr = castPtr ptr
+    tempSetPtr <- emptySignalSet
+    mapM_ (flip addSignal tempSetPtr) signals
+    withForeignPtr tempSetPtr $ \p -> copyBytes targetPtr p sizeOfCSigset
+
+instance ArgFormatting SigSet where
+  formatArg (SigSet signals) =
+    ListArg $ catMaybes $ map signalToStringArg signals
+    where
+      signalToStringArg =
+        fmap (FixedStringArg . snd) . flip Data.Map.lookup signalMap
