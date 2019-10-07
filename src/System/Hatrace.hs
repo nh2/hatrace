@@ -80,6 +80,8 @@ module System.Hatrace
   , SyscallExitDetails_sysinfo(..)
   , SyscallEnterDetails_poll(..)
   , SyscallExitDetails_poll(..)
+  , SyscallEnterDetails_ppoll(..)
+  , SyscallExitDetails_ppoll(..)
   , SyscallEnterDetails_mprotect(..)
   , SyscallExitDetails_mprotect(..)
   , SyscallEnterDetails_pkey_mprotect(..)
@@ -160,7 +162,7 @@ import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.Format
-import           System.Hatrace.SignalMap (signalMap)
+import           System.Hatrace.Signals (signalMap)
 import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
 
@@ -964,20 +966,47 @@ data SyscallEnterDetails_poll = SyscallEnterDetails_poll
   { fds :: Ptr PollFdStruct
   , nfds :: CULong
   , timeout :: CInt
+  , fdsValue :: [PollFdStruct]
   } deriving (Eq, Ord, Show)
 
 instance SyscallEnterFormatting SyscallEnterDetails_poll where
-  syscallEnterToFormatted SyscallEnterDetails_poll{ fds, nfds, timeout} =
-    FormattedSyscall "poll" [formatPtrArg "pollfd" fds, formatArg nfds, formatArg timeout]
+  syscallEnterToFormatted SyscallEnterDetails_poll{ fdsValue, nfds, timeout} =
+    FormattedSyscall "poll" [formatArg fdsValue, formatArg nfds, formatArg timeout]
 
 data SyscallExitDetails_poll = SyscallExitDetails_poll
   { enterDetail :: SyscallEnterDetails_poll
-  , pollfds :: [PollFdStruct]
+  , fdsValue :: [PollFdStruct]
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_poll where
-  syscallExitToFormatted SyscallExitDetails_poll{ enterDetail, pollfds } =
-    (syscallEnterToFormatted enterDetail, formatReturn pollfds)
+  syscallExitToFormatted SyscallExitDetails_poll{ enterDetail, fdsValue } =
+    (syscallEnterToFormatted enterDetail, formatReturn fdsValue)
+
+data SyscallEnterDetails_ppoll = SyscallEnterDetails_ppoll
+  { fds :: Ptr PollFdStruct
+  , nfds :: CULong
+  , tmo_p :: Ptr TimespecStruct
+  , sigmask :: Ptr SigSet
+  , fdsValue :: [PollFdStruct]
+  , tmo_pValue :: TimespecStruct
+  , sigmaskValue :: SigSet
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_ppoll where
+  syscallEnterToFormatted SyscallEnterDetails_ppoll{ fdsValue, nfds, tmo_pValue, sigmaskValue } =
+    FormattedSyscall "ppoll" [ formatArg fdsValue, formatArg nfds
+                             , formatArg tmo_pValue, formatArg sigmaskValue]
+
+data SyscallExitDetails_ppoll = SyscallExitDetails_ppoll
+  { enterDetail :: SyscallEnterDetails_ppoll
+  , fdsValue :: [PollFdStruct]
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_ppoll where
+  syscallExitToFormatted SyscallExitDetails_ppoll{ enterDetail, fdsValue } =
+    ( syscallEnterToFormatted enterDetail
+    , FormattedReturn $ formatArg fdsValue
+    )
 
 data ArchPrctlAddrArg
   = ArchPrctlAddrArgVal CULong
@@ -1157,6 +1186,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_set_tid_address SyscallEnterDetails_set_tid_address
   | DetailedSyscallEnter_sysinfo SyscallEnterDetails_sysinfo
   | DetailedSyscallEnter_poll SyscallEnterDetails_poll
+  | DetailedSyscallEnter_ppoll SyscallEnterDetails_ppoll
   | DetailedSyscallEnter_mprotect SyscallEnterDetails_mprotect
   | DetailedSyscallEnter_pkey_mprotect SyscallEnterDetails_pkey_mprotect
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
@@ -1193,6 +1223,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_set_tid_address SyscallExitDetails_set_tid_address
   | DetailedSyscallExit_sysinfo SyscallExitDetails_sysinfo
   | DetailedSyscallExit_poll SyscallExitDetails_poll
+  | DetailedSyscallExit_ppoll SyscallExitDetails_ppoll
   | DetailedSyscallExit_mprotect SyscallExitDetails_mprotect
   | DetailedSyscallExit_pkey_mprotect SyscallExitDetails_pkey_mprotect
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
@@ -1486,12 +1517,40 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { tidptr
       } 
   Syscall_poll -> do
-    let SyscallArgs{ arg0 = pollfdAddr, arg1 = nfds, arg2 = timeout } = syscallArgs
-    let pollfdPtr = word64ToPtr pollfdAddr
+    let SyscallArgs{ arg0 = fdsAddr, arg1 = nfds, arg2 = timeout } = syscallArgs
+        fdsPtr = word64ToPtr fdsAddr
+        -- This capping to max int below is a consequence of nfds var being a long,
+        -- while peekArray taking as an argument just an int. The assumption made
+        -- in here is that the number of checked fds will be less than max int.
+        n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+    fdsValue <- peekArray (TracedProcess pid) n fdsPtr
     pure $ DetailedSyscallEnter_poll $ SyscallEnterDetails_poll
-      { fds = pollfdPtr
+      { fds = fdsPtr
       , nfds = fromIntegral nfds
       , timeout = fromIntegral timeout
+      , fdsValue
+      }
+  Syscall_ppoll -> do
+    let SyscallArgs{ arg0 = fdsAddr, arg1 = nfds
+                   , arg2 = tmopAddr, arg3 = sigmaskAddr } = syscallArgs
+        fdsPtr = word64ToPtr fdsAddr
+        tmopPtr = word64ToPtr tmopAddr
+        sigmaskPtr = word64ToPtr sigmaskAddr
+        -- This capping to max int below is a consequence of nfds var being a long,
+        -- while peekArray taking as an argument just an int. The assumption made
+        -- in here is that the number of checked fds will be less than max int.
+        n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+    fdsValue <- peekArray (TracedProcess pid) n fdsPtr
+    tmo_pValue <- peek (TracedProcess pid) tmopPtr
+    sigmaskValue <- peek (TracedProcess pid) sigmaskPtr
+    pure $ DetailedSyscallEnter_ppoll $ SyscallEnterDetails_ppoll
+      { fds = fdsPtr
+      , nfds = fromIntegral nfds
+      , tmo_p = tmopPtr
+      , sigmask = sigmaskPtr
+      , fdsValue
+      , tmo_pValue
+      , sigmaskValue
       }
   Syscall_mprotect -> do
     let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = protWord } = syscallArgs
@@ -1711,9 +1770,19 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                 -- while peekArray taking as an argument just an int. The assumption made
                 -- in here is that the number of checked fds will be less than max int.
                 let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
-                pollfds <- peekArray (TracedProcess pid) n fds
+                fdsValue <- peekArray (TracedProcess pid) n fds
                 pure $ DetailedSyscallExit_poll $
-                  SyscallExitDetails_poll{ enterDetail, pollfds }
+                  SyscallExitDetails_poll{ enterDetail, fdsValue }
+
+            DetailedSyscallEnter_ppoll
+              enterDetail@SyscallEnterDetails_ppoll{ fds, nfds } -> do
+                -- This capping to max int below is a consequence of nfds var being a long,
+                -- while peekArray taking as an argument just an int. The assumption made
+                -- in here is that the number of checked fds will be less than max int.
+                let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+                fdsValue <- peekArray (TracedProcess pid) n fds
+                pure $ DetailedSyscallExit_ppoll $
+                  SyscallExitDetails_ppoll{ enterDetail, fdsValue }
 
             DetailedSyscallEnter_mprotect
               enterDetail@SyscallEnterDetails_mprotect{ } -> do
@@ -2133,6 +2202,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_poll details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_ppoll details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2235,6 +2306,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_exit_group details -> formatDetails details
 
     DetailedSyscallExit_poll details -> formatDetails details
+
+    DetailedSyscallExit_ppoll details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result

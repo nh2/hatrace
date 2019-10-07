@@ -14,6 +14,7 @@ import qualified Data.ByteString as BS
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
+import qualified Data.List as List
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe)
 import           Data.Set (Set)
@@ -21,15 +22,16 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (Errno(..), eBADF, eCONNRESET)
+import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Ptr (nullPtr, plusPtr)
-import           Foreign.Storable (sizeOf)
+import           Foreign.Storable (sizeOf, peek, poke)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
 import           System.IO.Temp (emptySystemTempFile)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
-import           System.Posix.Signals (sigTERM)
+import           System.Posix.Signals (sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
 import           System.Process (callProcess, readProcess)
 import           Test.Hspec
 import           Text.Read (readMaybe)
@@ -428,6 +430,13 @@ spec = before_ assertNoChildren $ do
             CL.consume
         exitCode `shouldBe` (ExitFailure newRetValue)
 
+  describe "storable instances" $ do
+
+    it "can correctly poke and peek SigSet" $ do
+      let origSigset = List.sort [sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL]
+      (SigSet pokedSigset) <- alloca $ \ptr -> do { poke ptr (SigSet origSigset); peek ptr }
+      pokedSigset `shouldContain` origSigset
+
   describe "per-syscall tests" $ do
 
     describe "read" $ do
@@ -757,23 +766,46 @@ spec = before_ assertNoChildren $ do
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
-        let pollResult = [ (nfds, pollfds)
+        let pollResult = [ (nfds, fdsValue)
                          | (_pid
                            , Right (DetailedSyscallExit_poll
                                     SyscallExitDetails_poll
-                                    { enterDetail = SyscallEnterDetails_poll{ nfds }, pollfds })
+                                    { enterDetail = SyscallEnterDetails_poll{ nfds }, fdsValue })
                            ) <- events
                          ]
         length pollResult `shouldBe` 1
-        let (nfds, pollfds) = head pollResult
-        length pollfds `shouldBe` 3
+        let (nfds, fdsValue) = head pollResult
+        length fdsValue `shouldBe` 3
 #ifdef USE_POLL_POLLRDHUP
-        System.Hatrace.Types.events (head pollfds) `shouldSatisfy` ( \case
+        System.Hatrace.Types.events (head fdsValue) `shouldSatisfy` ( \case
                                                   PollEventsKnown gpe -> pollrdhup gpe
                                                   _ -> False
                                               )
 #endif
         nfds `shouldBe` 3
+
+#ifdef USE_POLLING_WITH_SIGMASK
+    describe "ppoll" $ do
+      it "detects correctly all events and sigmask" $ do
+        let pollCall = "example-programs-build/ppoll"
+        callProcess "make" ["--quiet", pollCall]
+        tmpFile <- emptySystemTempFile "temp-file"
+        argv <- procToArgv pollCall [tmpFile]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallEnterDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let pollResult = [ (fdsValue, sigmaskValue)
+                         | (_pid
+                           , DetailedSyscallEnter_ppoll
+                               SyscallEnterDetails_ppoll{ fdsValue, sigmaskValue }
+                           ) <- events
+                         ]
+        length pollResult `shouldBe` 1
+        let (fdsValue, SigSet sigmask) = head pollResult
+        length fdsValue `shouldBe` 3
+        sigmask `shouldContain` [sigINT, sigQUIT, sigKILL, sigUSR1, sigSYS]
+#endif
 
     describe "arch_prctl" $ do
       it "seen ARCH_GET_FS used by example executable" $ do

@@ -30,7 +30,7 @@ library
   exposed-modules:     System.Hatrace
                        System.Hatrace.Format
                        System.Hatrace.Main
-                       System.Hatrace.SignalMap
+                       System.Hatrace.Signals
                        System.Hatrace.SyscallTables
                        System.Hatrace.SyscallTables.Generated
                        System.Hatrace.SyscallTables.Util
@@ -91,7 +91,10 @@ test-suite hatrace-test
   ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N
   if os(linux)
     -- See note on `DUSE_POLL_POLLRDHUP` above.
-    cpp-options:         -DUSE_POLL_POLLRDHUP
+    --
+    -- `USE_POLLING_WITH_SIGMASK` is used for polling syscalls, which
+    -- are supported only on Linux (pselect, ppoll, epoll_pwait)
+    cpp-options:         -DUSE_POLL_POLLRDHUP -DUSE_POLLING_WITH_SIGMASK
   default-language:    Haskell2010
 
 source-repository head

@@ -1,3 +1,5 @@
+DETECTED_OS := $(shell uname -s)
+
 EXAMPLE_SRC := example-programs
 EXAMPLE_DST := example-programs-build
 
@@ -7,6 +9,9 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-i386-elf64
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/hello-linux-x86_64
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/symlinkat
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/poll
+ifeq ($(DETECTED_OS), Linux)
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/ppoll
+endif
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/segfault
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve-linux-null-envp
