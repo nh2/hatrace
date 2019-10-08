@@ -156,12 +156,13 @@ instance ArgFormatting MMapMode where
     where
       formatMode (MMapModeKnown mode) =
         let granularModes = concat
-              [ case mapSharing mode of
+              [ case mapType mode of
                   MMapShared -> ["MAP_SHARED"]
                   MMapPrivate -> ["MAP_PRIVATE"]
 #ifdef MAP_SHARED_VALIDATE
                   MMapSharedValidate -> ["MAP_SHARED_VALIDATE"]
 #endif
+                  MMapTypeUnknown x -> [show x]
               , if map32Bit mode          then ["MAP_32BIT"]           else []
               , if mapAnonymous mode      then ["MAP_ANONYMOUS"]       else []
               , if mapDenyWrite mode      then ["MAP_DENYWRITE"]       else []
@@ -193,7 +194,10 @@ instance ArgFormatting MMapMode where
         in if null granularModes then "0" else intercalate "|" granularModes
       formatMode (MMapModeUnknown x) = show x
 
-data MMapSharing
+-- | https://github.com/torvalds/linux/blob/master/include/uapi/asm-generic/mman-common.h
+-- defines MAP_TYPE as 0x0f so in theory there could be up to 15 types but please keep
+-- in mind that it's Linux-specific
+data MMapType
   = MMapShared
   -- ^ Share this mapping.
   | MMapPrivate
@@ -207,11 +211,12 @@ data MMapSharing
   -- type is also required to be able to use some mapping flags (e.g., mapSync).
   -- (since Linux 4.15)
 #endif
+  | MMapTypeUnknown CUShort
   deriving (Eq, Ord, Show)
 
 -- | mmap mode, MAP_FILE and MAP_EXECUTABLE are ignored on Linux
 data GranularMMapMode = GranularMMapMode
-  { mapSharing :: MMapSharing
+  { mapType :: MMapType
   , map32Bit :: Bool
   , mapAnonymous :: Bool
   , mapDenyWrite :: Bool
@@ -244,16 +249,17 @@ data GranularMMapMode = GranularMMapMode
   } deriving (Eq, Ord, Show)
 
 instance CIntRepresentable MMapMode where
-  toCInt (MMapModeKnown gp) = foldr (.|.) (fromIntegral (0 :: Int)) setBits
+  toCInt (MMapModeKnown gp) = foldr (.|.) typeBits setBits
     where
-      setBits =
-        [ case mapSharing gp of
+      typeBits = fromIntegral $ case mapType gp of
             MMapShared -> (#const MAP_SHARED)
             MMapPrivate -> (#const MAP_PRIVATE)
 #ifdef MAP_SHARED_VALIDATE
             MMapSharedValidate -> (#const MAP_SHARED_VALIDATE)
 #endif
-        , if map32Bit gp          then (#const MAP_32BIT)           else 0
+            MMapTypeUnknown x -> x
+      setBits =
+        [ if map32Bit gp          then (#const MAP_32BIT)           else 0
         , if mapAnonymous gp      then (#const MAP_ANONYMOUS)       else 0
         , if mapDenyWrite gp      then (#const MAP_DENYWRITE)       else 0
         , if mapExecutable gp     then (#const MAP_EXECUTABLE)      else 0
@@ -286,7 +292,7 @@ instance CIntRepresentable MMapMode where
              | otherwise =
                 let isset f = (m .&. f) == f
                 in MMapModeKnown GranularMMapMode
-                   { mapSharing        =
+                   { mapType           =
 #ifdef MAP_SHARED_VALIDATE
                        if isset (#const MAP_SHARED_VALIDATE)
                        then MMapSharedValidate
