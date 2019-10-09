@@ -989,7 +989,7 @@ data SyscallEnterDetails_ppoll = SyscallEnterDetails_ppoll
 instance SyscallEnterFormatting SyscallEnterDetails_ppoll where
   syscallEnterToFormatted SyscallEnterDetails_ppoll{ fds, nfds, tmo_p, sigmask } =
     FormattedSyscall "ppoll" [ formatPtrArg "pollfd" fds, formatArg nfds
-                             , formatPtrArg "tmo_p" tmo_p, formatPtrArg "sigmask" sigmask]
+                             , formatPtrArg "timespec" tmo_p, formatPtrArg "sigset_t" sigmask]
 
 data SyscallExitDetails_ppoll = SyscallExitDetails_ppoll
   { enterDetail :: SyscallEnterDetails_ppoll

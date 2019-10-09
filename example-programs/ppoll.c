@@ -10,7 +10,7 @@
 #define TIMEOUT 5
 
 void die_usage(void) {
-  fprintf(stderr, "Usage: poll file\n");
+  fprintf(stderr, "Usage: ppoll file\n");
   exit(1);
 }
 
