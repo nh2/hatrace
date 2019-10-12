@@ -961,14 +961,15 @@ instance SyscallExitFormatting SyscallExitDetails_brk where
     (syscallEnterToFormatted enterDetail, formatReturn brkResult)
 
 data SyscallEnterDetails_poll = SyscallEnterDetails_poll
-  { fds :: Ptr PollFdStruct
+  { fdsPtr :: Ptr PollFdStruct
   , nfds :: CULong
   , timeout :: CInt
+  , pollfds :: [PollFdStruct]
   } deriving (Eq, Ord, Show)
 
 instance SyscallEnterFormatting SyscallEnterDetails_poll where
-  syscallEnterToFormatted SyscallEnterDetails_poll{ fds, nfds, timeout} =
-    FormattedSyscall "poll" [formatPtrArg "pollfd" fds, formatArg nfds, formatArg timeout]
+  syscallEnterToFormatted SyscallEnterDetails_poll{ pollfds, nfds, timeout} =
+    FormattedSyscall "poll" [formatArg pollfds, formatArg nfds, formatArg timeout]
 
 data SyscallExitDetails_poll = SyscallExitDetails_poll
   { enterDetail :: SyscallEnterDetails_poll
@@ -1474,11 +1475,17 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       } 
   Syscall_poll -> do
     let SyscallArgs{ arg0 = pollfdAddr, arg1 = nfds, arg2 = timeout } = syscallArgs
-    let pollfdPtr = word64ToPtr pollfdAddr
+        pollfdPtr = word64ToPtr pollfdAddr
+        -- This capping to max int below is a consequence of nfds var being a long,
+        -- while peekArray taking as an argument just an int. The assumption made
+        -- in here is that the number of checked fds will be less than max int.
+        n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+    pollfds <- peekArray (TracedProcess pid) n pollfdPtr
     pure $ DetailedSyscallEnter_poll $ SyscallEnterDetails_poll
-      { fds = pollfdPtr
+      { fdsPtr = pollfdPtr
       , nfds = fromIntegral nfds
       , timeout = fromIntegral timeout
+      , pollfds
       }
   Syscall_ppoll -> do
     let SyscallArgs{ arg0 = pollfdAddr, arg1 = nfds
@@ -1710,12 +1717,12 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                   SyscallExitDetails_sysinfo{ enterDetail, sysinfo }
 
             DetailedSyscallEnter_poll
-              enterDetail@SyscallEnterDetails_poll{ fds, nfds } -> do
+              enterDetail@SyscallEnterDetails_poll{ fdsPtr, nfds } -> do
                 -- This capping to max int below is a consequence of nfds var being a long,
                 -- while peekArray taking as an argument just an int. The assumption made
                 -- in here is that the number of checked fds will be less than max int.
                 let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
-                pollfds <- peekArray (TracedProcess pid) n fds
+                pollfds <- peekArray (TracedProcess pid) n fdsPtr
                 pure $ DetailedSyscallExit_poll $
                   SyscallExitDetails_poll{ enterDetail, pollfds }
 
