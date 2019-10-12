@@ -14,6 +14,7 @@ import qualified Data.ByteString as BS
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
+import qualified Data.List as List
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe)
 import           Data.Set (Set)
@@ -21,8 +22,9 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (Errno(..), eBADF, eCONNRESET)
+import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Ptr (nullPtr, plusPtr)
-import           Foreign.Storable (sizeOf)
+import           Foreign.Storable (sizeOf, peek, poke)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
@@ -427,6 +429,13 @@ spec = before_ assertNoChildren $ do
             CL.consume
         exitCode `shouldBe` (ExitFailure newRetValue)
 
+  describe "storable instances" $ do
+
+    it "can correctly poke and peek SigSet" $ do
+      let origSigset = List.sort [sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL]
+      (SigSet pokedSigset) <- alloca $ \ptr -> do { poke ptr (SigSet origSigset); peek ptr }
+      pokedSigset `shouldContain` origSigset
+
   describe "per-syscall tests" $ do
 
     describe "read" $ do
@@ -759,12 +768,12 @@ spec = before_ assertNoChildren $ do
         argv <- procToArgv pollCall [tmpFile]
         (exitCode, events) <-
           sourceTraceForkExecvFullPathWithSink argv $
-            syscallExitDetailsOnlyConduit .| CL.consume
+            syscallEnterDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let pollResult = [ (pollfds, sigmask)
                          | (_pid
-                           , Right (DetailedSyscallExit_ppoll
-                                    SyscallExitDetails_ppoll{ pollfds, sigmask })
+                           , DetailedSyscallEnter_ppoll
+                               SyscallEnterDetails_ppoll{ pollfds, sigmask }
                            ) <- events
                          ]
         length pollResult `shouldBe` 1

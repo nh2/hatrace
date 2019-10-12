@@ -21,7 +21,6 @@ import qualified Data.Map as Map
 import           Foreign.C.Error (throwErrnoIfMinus1, throwErrnoIfMinus1_)
 import           Foreign.C.Types (CInt(..))
 import           Foreign.ForeignPtr (ForeignPtr, withForeignPtr, mallocForeignPtrBytes)
-import           Foreign.Marshal (copyBytes)
 import           Foreign.Ptr (Ptr)
 import           System.Posix.Internals (sizeof_sigset_t, CSigset)
 import           System.Posix.Signals (Signal)
@@ -88,23 +87,19 @@ fullSignalSet = do
   throwErrnoIfMinus1_ "fullSignalSet" (withForeignPtr fp $ c_sigfillset)
   return fp
 
-addSignal :: Signals.Signal -> ForeignPtr CSigset -> IO (ForeignPtr CSigset)
-addSignal sig fp1 = do
-  fp2 <- mallocForeignPtrBytes sizeof_sigset_t
-  withForeignPtr fp1 $ \p1 ->
-    withForeignPtr fp2 $ \p2 -> do
-      copyBytes p2 p1 sizeof_sigset_t
-      throwErrnoIfMinus1_ "addSignal" (c_sigaddset p2 sig)
-  return fp2
+addSignal :: Signals.Signal -> ForeignPtr CSigset -> IO ()
+addSignal sig fPtr = do
+  withForeignPtr fPtr $ \ptr ->
+    throwErrnoIfMinus1_ "addSignal" (c_sigaddset ptr sig)
 
 foreign import capi unsafe "signal.h sigismember"
   c_sigismember :: Ptr CSigset -> CInt -> IO CInt
 
 foreign import capi unsafe "signal.h sigemptyset"
-   c_sigemptyset :: Ptr CSigset -> IO CInt
+  c_sigemptyset :: Ptr CSigset -> IO CInt
 
 foreign import capi unsafe "signal.h sigfillset"
-  c_sigfillset  :: Ptr CSigset -> IO CInt
+  c_sigfillset :: Ptr CSigset -> IO CInt
 
 foreign import capi unsafe "signal.h sigaddset"
-   c_sigaddset :: Ptr CSigset -> CInt -> IO CInt
+  c_sigaddset :: Ptr CSigset -> CInt -> IO CInt

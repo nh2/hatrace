@@ -33,7 +33,7 @@ module System.Hatrace.Types
   , SigSet(..)
   ) where
 
-import           Control.Monad (filterM, foldM)
+import           Control.Monad (filterM)
 import           Data.Bits
 import           Data.List (intercalate)
 import           Data.Map (lookup)
@@ -504,9 +504,9 @@ instance Storable SigSet where
     SigSet <$> filterM (flip inSignalSet sigsetPtr) allSignals
   poke ptr (SigSet signals) = do
     let targetPtr = castPtr ptr
-    emptySetPtr <- emptySignalSet
-    tempSetPtr <- foldM (flip addSignal) emptySetPtr signals
-    withForeignPtr tempSetPtr $ \p -> copyBytes p targetPtr sizeOfCSigset
+    tempSetPtr <- emptySignalSet
+    mapM_ (flip addSignal tempSetPtr) signals
+    withForeignPtr tempSetPtr $ \p -> copyBytes targetPtr p sizeOfCSigset
 
 instance ArgFormatting SigSet where
   formatArg (SigSet signals) =
