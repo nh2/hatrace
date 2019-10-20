@@ -50,6 +50,8 @@ module System.Hatrace
   , SyscallExitDetails_renameat2(..)
   , SyscallEnterDetails_unlink(..)
   , SyscallExitDetails_unlink(..)
+  , SyscallEnterDetails_unlinkat(..)
+  , SyscallExitDetails_unlinkat(..)
   , SyscallEnterDetails_stat(..)
   , SyscallExitDetails_stat(..)
   , SyscallEnterDetails_fstat(..)
@@ -704,6 +706,28 @@ instance SyscallExitFormatting SyscallExitDetails_unlink where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
+data SyscallEnterDetails_unlinkat = SyscallEnterDetails_unlinkat
+  { dirfd :: CInt
+  , pathname :: Ptr CChar
+  , flags :: CInt
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_unlinkat where
+  syscallEnterToFormatted SyscallEnterDetails_unlinkat{ dirfd, pathnameBS, flags } =
+    FormattedSyscall "unlinkat" [formatArg dirfd, formatArg pathnameBS, formatArg flags]
+
+
+data SyscallExitDetails_unlinkat = SyscallExitDetails_unlinkat
+  { enterDetail :: SyscallEnterDetails_unlinkat
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_unlinkat where
+  syscallExitToFormatted SyscallExitDetails_unlinkat{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 data SyscallEnterDetails_access = SyscallEnterDetails_access
   { pathname :: Ptr CChar
   , mode :: CInt
@@ -1194,6 +1218,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_renameat SyscallEnterDetails_renameat
   | DetailedSyscallEnter_renameat2 SyscallEnterDetails_renameat2
   | DetailedSyscallEnter_unlink SyscallEnterDetails_unlink
+  | DetailedSyscallEnter_unlinkat SyscallEnterDetails_unlinkat
   | DetailedSyscallEnter_stat SyscallEnterDetails_stat
   | DetailedSyscallEnter_fstat SyscallEnterDetails_fstat
   | DetailedSyscallEnter_lstat SyscallEnterDetails_lstat
@@ -1232,6 +1257,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_renameat SyscallExitDetails_renameat
   | DetailedSyscallExit_renameat2 SyscallExitDetails_renameat2
   | DetailedSyscallExit_unlink SyscallExitDetails_unlink
+  | DetailedSyscallExit_unlinkat SyscallExitDetails_unlinkat
   | DetailedSyscallExit_stat SyscallExitDetails_stat
   | DetailedSyscallExit_fstat SyscallExitDetails_fstat
   | DetailedSyscallExit_lstat SyscallExitDetails_lstat
@@ -1430,6 +1456,16 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { pathname = pathnamePtr
       , pathnameBS
       }
+  Syscall_unlinkat -> do
+    let SyscallArgs{ arg0 = dirfd, arg1 = pathname, arg2 = flags } = syscallArgs
+        pathnamePtr = word64ToPtr pathname
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_unlinkat $ SyscallEnterDetails_unlinkat
+      { dirfd = fromIntegral dirfd
+      , pathname = pathnamePtr
+      , flags = fromIntegral flags
+      , pathnameBS
+      }
   Syscall_stat -> do
     let SyscallArgs{ arg0 = pathnameAddr, arg1 = statbufAddr } = syscallArgs
     let pathnamePtr = word64ToPtr pathnameAddr
@@ -1547,7 +1583,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     let tidptr = word64ToPtr pidAddr
     pure $ DetailedSyscallEnter_set_tid_address $ SyscallEnterDetails_set_tid_address
       { tidptr
-      } 
+      }
   Syscall_poll -> do
     let SyscallArgs{ arg0 = fdsAddr, arg1 = nfds, arg2 = timeout } = syscallArgs
         fdsPtr = word64ToPtr fdsAddr
@@ -1715,6 +1751,11 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
               enterDetail@SyscallEnterDetails_unlink{} -> do
                 pure $ DetailedSyscallExit_unlink $
                   SyscallExitDetails_unlink { enterDetail }
+
+            DetailedSyscallEnter_unlinkat
+              enterDetail@SyscallEnterDetails_unlinkat{} -> do
+                pure $ DetailedSyscallExit_unlinkat $
+                  SyscallExitDetails_unlinkat { enterDetail }
 
             DetailedSyscallEnter_stat
               enterDetail@SyscallEnterDetails_stat{statbuf} -> do
@@ -2243,6 +2284,8 @@ formatSyscallEnter syscall syscallArgs pid =
 
         DetailedSyscallEnter_unlink details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_unlinkat details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2349,6 +2392,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_ppoll details -> formatDetails details
 
     DetailedSyscallExit_unlink details -> formatDetails details
+
+    DetailedSyscallExit_unlinkat details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
