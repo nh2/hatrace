@@ -505,8 +505,12 @@ data ConcreteAddressFamily
   | AddressFamilyPPPoX
   | AddressFamilywanpipe
   | AddressFamilyLLC
+#ifdef AF_IB
   | AddressFamilyIB
+#endif
+#ifdef AF_MPLS
   | AddressFamilyMPLS
+#endif
   | AddressFamilyCAN
   | AddressFamilyTIPC
   | AddressFamilyBluetooth
@@ -519,10 +523,18 @@ data ConcreteAddressFamily
   | AddressFamilyAlg
   | AddressFamilyNFC
   | AddressFamilyVSock
+#ifdef AF_KCM
   | AddressFamilyKCM
+#endif
+#ifdef AF_QIPCRTR
   | AddressFamilyQIPCRTR
+#endif
+#ifdef AF_SMC
   | AddressFamilySMC
+#endif
+#ifdef AF_XDP
   | AddressFamilyXDP
+#endif
   deriving (Eq, Ord, Show)
 
 instance CIntRepresentable AddressFamily where
@@ -555,8 +567,12 @@ instance CIntRepresentable AddressFamily where
       AddressFamilyPPPoX -> (#const AF_PPPOX)
       AddressFamilywanpipe -> (#const AF_WANPIPE)
       AddressFamilyLLC -> (#const AF_LLC)
+#ifdef AF_IB
       AddressFamilyIB -> (#const AF_IB)
+#endif
+#ifdef AF_MPLS
       AddressFamilyMPLS -> (#const AF_MPLS)
+#endif
       AddressFamilyCAN -> (#const AF_CAN)
       AddressFamilyTIPC -> (#const AF_TIPC)
       AddressFamilyBluetooth -> (#const AF_BLUETOOTH)
@@ -569,10 +585,18 @@ instance CIntRepresentable AddressFamily where
       AddressFamilyAlg -> (#const AF_ALG)
       AddressFamilyNFC -> (#const AF_NFC)
       AddressFamilyVSock -> (#const AF_VSOCK)
+#ifdef AF_KCM
       AddressFamilyKCM -> (#const AF_KCM)
+#endif
+#ifdef AF_QIPCRTR
       AddressFamilyQIPCRTR -> (#const AF_QIPCRTR)
+#endif
+#ifdef AF_SMC
       AddressFamilySMC -> (#const AF_SMC)
+#endif
+#ifdef AF_XDP
       AddressFamilyXDP -> (#const AF_XDP)
+#endif
   toCInt (AddressFamilyUnknown unknown) = unknown
   fromCInt af = case af of
       (#const AF_UNSPEC) -> AddressFamilyKnown AddressFamilyUnspecified
@@ -602,8 +626,12 @@ instance CIntRepresentable AddressFamily where
       (#const AF_PPPOX) -> AddressFamilyKnown AddressFamilyPPPoX
       (#const AF_WANPIPE) -> AddressFamilyKnown AddressFamilywanpipe
       (#const AF_LLC) -> AddressFamilyKnown AddressFamilyLLC
+#ifdef AF_IB
       (#const AF_IB) -> AddressFamilyKnown AddressFamilyIB
+#endif
+#ifdef AF_MPLS
       (#const AF_MPLS) -> AddressFamilyKnown AddressFamilyMPLS
+#endif
       (#const AF_CAN) -> AddressFamilyKnown AddressFamilyCAN
       (#const AF_TIPC) -> AddressFamilyKnown AddressFamilyTIPC
       (#const AF_BLUETOOTH) -> AddressFamilyKnown AddressFamilyBluetooth
@@ -616,10 +644,18 @@ instance CIntRepresentable AddressFamily where
       (#const AF_ALG) -> AddressFamilyKnown AddressFamilyAlg
       (#const AF_NFC) -> AddressFamilyKnown AddressFamilyNFC
       (#const AF_VSOCK) -> AddressFamilyKnown AddressFamilyVSock
+#ifdef AF_KCM
       (#const AF_KCM) -> AddressFamilyKnown AddressFamilyKCM
+#endif
+#ifdef AF_QIPCRTR
       (#const AF_QIPCRTR) -> AddressFamilyKnown AddressFamilyQIPCRTR
+#endif
+#ifdef AF_SMC
       (#const AF_SMC) -> AddressFamilyKnown AddressFamilySMC
+#endif
+#ifdef AF_XDP
       (#const AF_XDP) -> AddressFamilyKnown AddressFamilyXDP
+#endif
       unknown -> AddressFamilyUnknown unknown
 
 instance ArgFormatting AddressFamily where
@@ -652,8 +688,12 @@ instance ArgFormatting AddressFamily where
       AddressFamilyPPPoX -> "AF_PPPOX"
       AddressFamilywanpipe -> "AF_WANPIPE"
       AddressFamilyLLC -> "AF_LLC"
+#ifdef AF_IB
       AddressFamilyIB -> "AF_IB"
+#endif
+#ifdef AF_MPLS
       AddressFamilyMPLS -> "AF_MPLS"
+#endif
       AddressFamilyCAN -> "AF_CAN"
       AddressFamilyTIPC -> "AF_TIPC"
       AddressFamilyBluetooth -> "AF_BLUETOOTH"
@@ -666,10 +706,18 @@ instance ArgFormatting AddressFamily where
       AddressFamilyAlg -> "AF_ALG"
       AddressFamilyNFC -> "AF_NFC"
       AddressFamilyVSock -> "AF_VSOCK"
+#ifdef AF_KCM
       AddressFamilyKCM -> "AF_KCM"
+#endif
+#ifdef AF_QIPCRTR
       AddressFamilyQIPCRTR -> "AF_QIPCRTR"
+#endif
+#ifdef AF_SMC
       AddressFamilySMC -> "AF_SMC"
+#endif
+#ifdef AF_XDP
       AddressFamilyXDP -> "AF_XDP"
+#endif
   formatArg (AddressFamilyUnknown unknown) =
     IntegerArg (fromIntegral unknown)
 
