@@ -1318,12 +1318,13 @@ data SyscallEnterDetails_send = SyscallEnterDetails_send
   , flags :: CUInt
   -- Peeked details
   , bufContents :: ByteString
+  , msgFlags :: SendFlags
   } deriving (Eq, Ord, Show)
 
 
 instance SyscallEnterFormatting SyscallEnterDetails_send where
-  syscallEnterToFormatted SyscallEnterDetails_send{ fd, buff, len, flags } =
-    FormattedSyscall "send" [ formatArg fd, formatArg buff, formatArg len, formatArg flags ]
+  syscallEnterToFormatted SyscallEnterDetails_send{ fd, bufContents, len, msgFlags } =
+    FormattedSyscall "send" [ formatArg fd, formatArg bufContents, formatArg len, formatArg msgFlags ]
 
 
 data SyscallExitDetails_send = SyscallExitDetails_send
@@ -1825,6 +1826,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , len = fromIntegral len
       , flags = fromIntegral flags
       , bufContents
+      , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_mmap -> do
     let SyscallArgs{ arg0 = addr, arg1 = len, arg2 = prot, arg3 = flags, arg4 = fd, arg5 = offset } = syscallArgs
