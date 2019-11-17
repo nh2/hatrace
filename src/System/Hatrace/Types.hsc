@@ -43,6 +43,8 @@ module System.Hatrace.Types
   , ShutdownHow(..)
   , SendFlags(..)
   , GranularSendFlags(..)
+  , ReceiveFlags(..)
+  , GranularReceiveFlags(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -820,25 +822,25 @@ data SendFlags
   deriving (Eq, Ord, Show)
 
 data GranularSendFlags = GranularSendFlags
-  { msgOOB :: Bool
-  , msgDontRoute :: Bool
-  , msgDontWait :: Bool
-  , msgEOR :: Bool
-  , msgConfirm :: Bool
-  , msgNoSignal :: Bool
-  , msgMore :: Bool
+  { sendMsgOOB :: Bool
+  , sendMsgDontRoute :: Bool
+  , sendMsgDontWait :: Bool
+  , sendMsgEOR :: Bool
+  , sendMsgConfirm :: Bool
+  , sendMsgNoSignal :: Bool
+  , sendMsgMore :: Bool
   } deriving (Eq, Ord, Show)
 
 instance ArgFormatting SendFlags where
   formatArg (SendFlagsKnown flags) =
     let flagValues = concat
-          [ if msgOOB flags then ["MSG_OOB"] else []
-          , if msgDontRoute flags then ["MSG_DONTROUTE"] else []
-          , if msgDontWait flags then ["MSG_DONTWAIT"] else []
-          , if msgEOR flags then ["MSG_EOR"] else []
-          , if msgConfirm flags then ["MSG_CONFIRM"] else []
-          , if msgNoSignal flags then ["MSG_NOSIGNAL"] else []
-          , if msgMore flags then ["MSG_MORE"] else []
+          [ if sendMsgOOB flags then ["MSG_OOB"] else []
+          , if sendMsgDontRoute flags then ["MSG_DONTROUTE"] else []
+          , if sendMsgDontWait flags then ["MSG_DONTWAIT"] else []
+          , if sendMsgEOR flags then ["MSG_EOR"] else []
+          , if sendMsgConfirm flags then ["MSG_CONFIRM"] else []
+          , if sendMsgNoSignal flags then ["MSG_NOSIGNAL"] else []
+          , if sendMsgMore flags then ["MSG_MORE"] else []
           ]
     in if null flagValues then IntegerArg 0 else FixedStringArg (intercalate "|" flagValues)
   formatArg (SendFlagsUnknown unknown) = IntegerArg (fromIntegral unknown)
@@ -847,13 +849,13 @@ instance CIntRepresentable SendFlags where
   toCInt (SendFlagsKnown flags) =
     let readFlag field flag = if field flags then flag else 0
         allFlags =
-          [ (msgOOB, (#const MSG_OOB))
-          , (msgDontRoute, (#const MSG_DONTROUTE))
-          , (msgDontWait, (#const MSG_DONTWAIT))
-          , (msgEOR, (#const MSG_EOR))
-          , (msgConfirm, (#const MSG_CONFIRM))
-          , (msgNoSignal, (#const MSG_NOSIGNAL))
-          , (msgMore, (#const MSG_MORE))
+          [ (sendMsgOOB, (#const MSG_OOB))
+          , (sendMsgDontRoute, (#const MSG_DONTROUTE))
+          , (sendMsgDontWait, (#const MSG_DONTWAIT))
+          , (sendMsgEOR, (#const MSG_EOR))
+          , (sendMsgConfirm, (#const MSG_CONFIRM))
+          , (sendMsgNoSignal, (#const MSG_NOSIGNAL))
+          , (sendMsgMore, (#const MSG_MORE))
           ]
     in foldr (.|.) zeroBits $ map (uncurry readFlag) allFlags
   toCInt (SendFlagsUnknown unknown) = unknown
@@ -873,15 +875,84 @@ instance CIntRepresentable SendFlags where
     in if onlyKnown
        then SendFlagsKnown $
             GranularSendFlags
-            { msgOOB = isset (#const MSG_OOB)
-            , msgDontRoute = isset (#const MSG_DONTROUTE)
-            , msgDontWait = isset (#const MSG_DONTWAIT)
-            , msgEOR = isset (#const MSG_EOR)
-            , msgConfirm = isset (#const MSG_CONFIRM)
-            , msgNoSignal = isset (#const MSG_NOSIGNAL)
-            , msgMore = isset (#const MSG_MORE)
+            { sendMsgOOB = isset (#const MSG_OOB)
+            , sendMsgDontRoute = isset (#const MSG_DONTROUTE)
+            , sendMsgDontWait = isset (#const MSG_DONTWAIT)
+            , sendMsgEOR = isset (#const MSG_EOR)
+            , sendMsgConfirm = isset (#const MSG_CONFIRM)
+            , sendMsgNoSignal = isset (#const MSG_NOSIGNAL)
+            , sendMsgMore = isset (#const MSG_MORE)
             }
        else SendFlagsUnknown flags
+
+data ReceiveFlags
+  = ReceiveFlagsKnown GranularReceiveFlags
+  | ReceiveFlagsUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data GranularReceiveFlags = GranularReceiveFlags
+  { recvMsgCmsgCloExec :: Bool
+  , recvMsgDontWait :: Bool
+  , recvMsgErrQueue :: Bool
+  , recvMsgOOB :: Bool
+  , recvMsgPeek :: Bool
+  , recvMsgTrunc :: Bool
+  , recvMsgWaitAll :: Bool
+  } deriving (Eq, Ord, Show)
+
+instance ArgFormatting ReceiveFlags where
+  formatArg (ReceiveFlagsKnown flags) =
+    let flagValues = concat
+          [ if recvMsgCmsgCloExec flags then ["MSG_CMSG_CLOEXEC"] else []
+          , if recvMsgDontWait flags then ["MSG_DONTWAIT"] else []
+          , if recvMsgErrQueue flags then ["MSG_ERRQUEUE"] else []
+          , if recvMsgOOB flags then ["MSG_OOB"] else []
+          , if recvMsgPeek flags then ["MSG_PEEK"] else []
+          , if recvMsgTrunc flags then ["MSG_TRUNC"] else []
+          , if recvMsgWaitAll flags then ["MSG_WAITALL"] else []
+          ]
+    in if null flagValues then IntegerArg 0 else FixedStringArg (intercalate "|" flagValues)
+  formatArg (ReceiveFlagsUnknown unknown) = IntegerArg (fromIntegral unknown)
+
+instance CIntRepresentable ReceiveFlags where
+  toCInt (ReceiveFlagsKnown flags) =
+    let readFlag field flag = if field flags then flag else 0
+        allFlags =
+          [ (recvMsgCmsgCloExec, (#const MSG_CMSG_CLOEXEC))
+          , (recvMsgDontWait, (#const MSG_DONTWAIT))
+          , (recvMsgErrQueue, (#const MSG_ERRQUEUE))
+          , (recvMsgOOB, (#const MSG_OOB))
+          , (recvMsgPeek, (#const MSG_PEEK))
+          , (recvMsgTrunc, (#const MSG_TRUNC))
+          , (recvMsgWaitAll, (#const MSG_WAITALL))
+          ]
+    in foldr (.|.) zeroBits $ map (uncurry readFlag) allFlags
+  toCInt (ReceiveFlagsUnknown unknown) = unknown
+  fromCInt flags =
+    let isset f = flags `hasSetBits` f
+        allBitsKnown = foldr (.|.) zeroBits bitsKnown
+        bitsKnown =
+          [ (#const MSG_CMSG_CLOEXEC)
+          , (#const MSG_DONTROUTE)
+          , (#const MSG_ERRQUEUE)
+          , (#const MSG_OOB)
+          , (#const MSG_PEEK)
+          , (#const MSG_TRUNC)
+          , (#const MSG_WAITALL)
+          ]
+        onlyKnown = flags .&. complement allBitsKnown /= zeroBits
+    in if onlyKnown
+       then ReceiveFlagsKnown $
+            GranularReceiveFlags
+            { recvMsgCmsgCloExec = isset (#const MSG_CMSG_CLOEXEC)
+            , recvMsgDontWait = isset (#const MSG_DONTWAIT)
+            , recvMsgErrQueue = isset (#const MSG_ERRQUEUE)
+            , recvMsgOOB = isset (#const MSG_OOB)
+            , recvMsgPeek = isset (#const MSG_PEEK)
+            , recvMsgTrunc = isset (#const MSG_TRUNC)
+            , recvMsgWaitAll = isset (#const MSG_WAITALL)
+            }
+       else ReceiveFlagsUnknown flags
 
 instance ArgFormatting TimespecStruct where
   formatArg TimespecStruct {..} =
