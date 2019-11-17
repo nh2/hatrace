@@ -1375,6 +1375,8 @@ data SyscallEnterDetails_recv = SyscallEnterDetails_recv
   , ubuf :: Ptr Void
   , size :: CSize
   , flags :: CUInt
+  -- Peeked details
+  , msgFlags :: ReceiveFlags
   } deriving (Eq, Ord, Show)
 
 
@@ -1393,10 +1395,10 @@ data SyscallExitDetails_recv = SyscallExitDetails_recv
 
 instance SyscallExitFormatting SyscallExitDetails_recv where
   syscallExitToFormatted SyscallExitDetails_recv{ enterDetail, numReceived, bufContents } =
-    ( FormattedSyscall "recv" [ formatArg fd, formatArg bufContents, formatArg size, formatArg flags ]
+    ( FormattedSyscall "recv" [ formatArg fd, formatArg bufContents, formatArg size, formatArg msgFlags ]
     , formatReturn numReceived)
     where
-      SyscallEnterDetails_recv{ fd, size, flags } = enterDetail
+      SyscallEnterDetails_recv{ fd, size, msgFlags } = enterDetail
 
 
 data SyscallEnterDetails_recvfrom = SyscallEnterDetails_recvfrom
@@ -1406,6 +1408,8 @@ data SyscallEnterDetails_recvfrom = SyscallEnterDetails_recvfrom
   , flags :: CUInt
   , addr :: Ptr Void -- TODO StructSockAddr
   , addrlen :: Ptr CInt
+  -- Peeked details
+  , msgFlags :: ReceiveFlags
   } deriving (Eq, Ord, Show)
 
 
@@ -1426,11 +1430,11 @@ data SyscallExitDetails_recvfrom = SyscallExitDetails_recvfrom
 instance SyscallExitFormatting SyscallExitDetails_recvfrom where
   syscallExitToFormatted SyscallExitDetails_recvfrom{ enterDetail, numReceived, bufContents } =
     ( FormattedSyscall "recvfrom" [ formatArg fd, formatArg bufContents, formatArg size
-                                  , formatArg flags, formatArg addr, formatPtrArg "int" addrlen
+                                  , formatArg msgFlags, formatArg addr, formatPtrArg "int" addrlen
                                   ]
     , formatReturn numReceived)
     where
-      SyscallEnterDetails_recvfrom{ fd, size, flags, addr, addrlen } = enterDetail
+      SyscallEnterDetails_recvfrom{ fd, size, msgFlags, addr, addrlen } = enterDetail
 
 
 data SyscallEnterDetails_socketpair = SyscallEnterDetails_socketpair
@@ -1862,6 +1866,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , ubuf = ubufPtr
       , size = fromIntegral size
       , flags = fromIntegral flags
+      , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_recvfrom -> do
     let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags, arg4 = addrAddr, arg5 = addrlenAddr } = syscallArgs
@@ -1875,6 +1880,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , flags = fromIntegral flags
       , addr = addrPtr
       , addrlen = addrlenPtr
+      , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_socketpair -> do
     let SyscallArgs{ arg0 = domain, arg1 = type_, arg2 = protocol, arg3 = svAddr } = syscallArgs
