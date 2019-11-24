@@ -1086,7 +1086,7 @@ instance ArgFormatting ArchPrctlAddrArg where
 data SyscallEnterDetails_arch_prctl = SyscallEnterDetails_arch_prctl
   { code :: CInt
   , addr :: ArchPrctlAddrArg
-  -- peeked details
+  -- Peeked details
   , subfunction :: ArchPrctlSubfunction
   } deriving (Eq, Ord, Show)
 
@@ -1097,7 +1097,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_arch_prctl where
 
 data SyscallExitDetails_arch_prctl = SyscallExitDetails_arch_prctl
   { enterDetail :: SyscallEnterDetails_arch_prctl
-  -- peeked details
+  -- Peeked details
   , addrValue :: CULong
   } deriving (Eq, Ord, Show)
 
@@ -1119,7 +1119,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_set_tid_address where
 
 data SyscallExitDetails_set_tid_address = SyscallExitDetails_set_tid_address
   { enterDetail :: SyscallEnterDetails_set_tid_address
-  -- peeked details
+  -- Peeked details
   , tidResult :: CLong
   } deriving (Eq, Ord, Show)
 
@@ -1244,7 +1244,7 @@ data SyscallEnterDetails_socket = SyscallEnterDetails_socket
   { domain :: CInt
   , type_ :: CInt
   , protocol :: CInt
-  -- peeked details
+  -- Peeked details
   , addressFamily :: AddressFamily
   , socketType :: SocketType
   } deriving (Eq, Ord, Show)
@@ -1313,7 +1313,7 @@ instance SyscallExitFormatting SyscallExitDetails_shutdown where
 
 data SyscallEnterDetails_send = SyscallEnterDetails_send
   { fd :: CInt
-  , buff :: Ptr Void
+  , buf :: Ptr Void
   , len :: CSize
   , flags :: CUInt
   -- Peeked details
@@ -1340,7 +1340,7 @@ instance SyscallExitFormatting SyscallExitDetails_send where
 
 data SyscallEnterDetails_sendto = SyscallEnterDetails_sendto
   { fd :: CInt
-  , buff :: Ptr Void
+  , buf :: Ptr Void
   , len :: CSize
   , flags :: CUInt
   , addr :: Ptr Void -- TODO StructSockAddr
@@ -1372,7 +1372,7 @@ instance SyscallExitFormatting SyscallExitDetails_sendto where
 
 data SyscallEnterDetails_recv = SyscallEnterDetails_recv
   { fd :: CInt
-  , ubuf :: Ptr Void
+  , buf :: Ptr Void
   , size :: CSize
   , flags :: CUInt
   -- Peeked details
@@ -1381,8 +1381,8 @@ data SyscallEnterDetails_recv = SyscallEnterDetails_recv
 
 
 instance SyscallEnterFormatting SyscallEnterDetails_recv where
-  syscallEnterToFormatted SyscallEnterDetails_recv{ fd, ubuf, size, flags } =
-    FormattedSyscall "recv" [ formatArg fd, formatArg ubuf, formatArg size, formatArg flags ]
+  syscallEnterToFormatted SyscallEnterDetails_recv{ fd, buf, size, flags } =
+    FormattedSyscall "recv" [ formatArg fd, formatArg buf, formatArg size, formatArg flags ]
 
 
 data SyscallExitDetails_recv = SyscallExitDetails_recv
@@ -1403,7 +1403,7 @@ instance SyscallExitFormatting SyscallExitDetails_recv where
 
 data SyscallEnterDetails_recvfrom = SyscallEnterDetails_recvfrom
   { fd :: CInt
-  , ubuf :: Ptr Void
+  , buf :: Ptr Void
   , size :: CSize
   , flags :: CUInt
   , addr :: Ptr Void -- TODO StructSockAddr
@@ -1414,8 +1414,8 @@ data SyscallEnterDetails_recvfrom = SyscallEnterDetails_recvfrom
 
 
 instance SyscallEnterFormatting SyscallEnterDetails_recvfrom where
-  syscallEnterToFormatted SyscallEnterDetails_recvfrom{ fd, ubuf, size, flags, addr, addrlen } =
-    FormattedSyscall "recvfrom" [ formatArg fd, formatArg ubuf, formatArg size
+  syscallEnterToFormatted SyscallEnterDetails_recvfrom{ fd, buf, size, flags, addr, addrlen } =
+    FormattedSyscall "recvfrom" [ formatArg fd, formatArg buf, formatArg size
                                 , formatArg flags, formatArg addr, formatPtrArg "int" addrlen ]
 
 
@@ -1441,8 +1441,9 @@ data SyscallEnterDetails_socketpair = SyscallEnterDetails_socketpair
   { domain :: CInt
   , type_ :: CInt
   , protocol :: CInt
+  -- | points to an array of 2 CInts i.e. 'int sv[2]' in C headers
   , sv :: Ptr CInt
-  -- peeked details
+  -- Peeked details
   , addressFamily :: AddressFamily
   , socketType :: SocketType
   } deriving (Eq, Ord, Show)
@@ -1456,6 +1457,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_socketpair where
 
 data SyscallExitDetails_socketpair = SyscallExitDetails_socketpair
   { enterDetail :: SyscallEnterDetails_socketpair
+  -- Peeked details
   , sockfd1 :: CInt
   , sockfd2 :: CInt
   } deriving (Eq, Ord, Show)
@@ -1821,12 +1823,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , shutdownHow = fromCInt (fromIntegral how)
       }
   Syscall_send -> do
-    let SyscallArgs{ arg0 = fd, arg1 = buffAddr, arg2 = len, arg3 = flags } = syscallArgs
-    let buffPtr = word64ToPtr buffAddr
-    bufContents <- peekBytes proc buffPtr (fromIntegral len)
+    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = len, arg3 = flags } = syscallArgs
+    let bufPtr = word64ToPtr bufAddr
+    bufContents <- peekBytes proc bufPtr (fromIntegral len)
     pure $ DetailedSyscallEnter_send $ SyscallEnterDetails_send
       { fd = fromIntegral fd
-      , buff = buffPtr
+      , buf = bufPtr
       , len = fromIntegral len
       , flags = fromIntegral flags
       , bufContents
@@ -1844,13 +1846,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , offset = fromIntegral offset
       }
   Syscall_sendto -> do
-    let SyscallArgs{ arg0 = fd, arg1 = buffAddr, arg2 = len, arg3 = flags, arg4 = addrAddr, arg5 = addrlen } = syscallArgs
-    let buffPtr = word64ToPtr buffAddr
+    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = len, arg3 = flags, arg4 = addrAddr, arg5 = addrlen } = syscallArgs
+    let bufPtr = word64ToPtr bufAddr
     let addrPtr = word64ToPtr addrAddr
-    bufContents <- peekBytes proc buffPtr (fromIntegral len)
+    bufContents <- peekBytes proc bufPtr (fromIntegral len)
     pure $ DetailedSyscallEnter_sendto $ SyscallEnterDetails_sendto
       { fd = fromIntegral fd
-      , buff = buffPtr
+      , buf = bufPtr
       , len = fromIntegral len
       , flags = fromIntegral flags
       , addr = addrPtr
@@ -1859,23 +1861,23 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_recv -> do
-    let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags } = syscallArgs
-    let ubufPtr = word64ToPtr ubufAddr
+    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = size, arg3 = flags } = syscallArgs
+    let bufPtr = word64ToPtr bufAddr
     pure $ DetailedSyscallEnter_recv $ SyscallEnterDetails_recv
       { fd = fromIntegral fd
-      , ubuf = ubufPtr
+      , buf = bufPtr
       , size = fromIntegral size
       , flags = fromIntegral flags
       , msgFlags = fromCInt (fromIntegral flags)
       }
   Syscall_recvfrom -> do
-    let SyscallArgs{ arg0 = fd, arg1 = ubufAddr, arg2 = size, arg3 = flags, arg4 = addrAddr, arg5 = addrlenAddr } = syscallArgs
-    let ubufPtr = word64ToPtr ubufAddr
+    let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = size, arg3 = flags, arg4 = addrAddr, arg5 = addrlenAddr } = syscallArgs
+    let bufPtr = word64ToPtr bufAddr
     let addrPtr = word64ToPtr addrAddr
     let addrlenPtr = word64ToPtr addrlenAddr
     pure $ DetailedSyscallEnter_recvfrom $ SyscallEnterDetails_recvfrom
       { fd = fromIntegral fd
-      , ubuf = ubufPtr
+      , buf = bufPtr
       , size = fromIntegral size
       , flags = fromIntegral flags
       , addr = addrPtr
@@ -2192,14 +2194,14 @@ getSyscallExitDetails' knownSyscall syscallArgs result pid =
                   SyscallExitDetails_sendto{ enterDetail, numSent = fromIntegral result }
 
             DetailedSyscallEnter_recv
-              enterDetail@SyscallEnterDetails_recv{ ubuf } -> do
-                bufContents <- peekBytes (TracedProcess pid) ubuf (fromIntegral result)
+              enterDetail@SyscallEnterDetails_recv{ buf } -> do
+                bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
                 pure $ DetailedSyscallExit_recv $
                   SyscallExitDetails_recv{ enterDetail, numReceived = fromIntegral result, bufContents }
 
             DetailedSyscallEnter_recvfrom
-              enterDetail@SyscallEnterDetails_recvfrom{ ubuf } -> do
-                bufContents <- peekBytes (TracedProcess pid) ubuf (fromIntegral result)
+              enterDetail@SyscallEnterDetails_recvfrom{ buf } -> do
+                bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
                 pure $ DetailedSyscallExit_recvfrom $
                   SyscallExitDetails_recvfrom{ enterDetail, numReceived = fromIntegral result, bufContents }
 

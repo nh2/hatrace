@@ -760,11 +760,11 @@ instance CIntRepresentable SocketType where
   toCInt (SocketTypeUnknown unknown) = unknown
   fromCInt s
     | s `hasSetBits` (#const SOCK_STREAM) = socketOfType SocketStream
-    | s `hasSetBits` (#const SOCK_DGRAM)  = socketOfType SocketDgram
-    | s `hasSetBits` (#const SOCK_SEQPACKET)  = socketOfType SocketSeqPacket
-    | s `hasSetBits` (#const SOCK_RAW)  = socketOfType SocketRaw
-    | s `hasSetBits` (#const SOCK_RDM)  = socketOfType SocketRDM
-    | s `hasSetBits` (#const SOCK_PACKET)  = socketOfType SocketPacket
+    | s `hasSetBits` (#const SOCK_DGRAM) = socketOfType SocketDgram
+    | s `hasSetBits` (#const SOCK_SEQPACKET) = socketOfType SocketSeqPacket
+    | s `hasSetBits` (#const SOCK_RAW) = socketOfType SocketRaw
+    | s `hasSetBits` (#const SOCK_RDM) = socketOfType SocketRDM
+    | s `hasSetBits` (#const SOCK_PACKET) = socketOfType SocketPacket
     | otherwise = SocketTypeUnknown s
     where
       socketOfType t = SocketTypeKnown $ SocketDetails t nonBlock cloExec
@@ -777,12 +777,12 @@ instance ArgFormatting SocketType where
     FixedStringArg $ intercalate "|" (baseTypeStr ++ nonBlock ++ cloExec)
     where
       baseTypeStr = case sdType of
-          SocketStream    -> ["SOCK_STREAM"]
-          SocketDgram     -> ["SOCK_DGRAM"]
+          SocketStream -> ["SOCK_STREAM"]
+          SocketDgram -> ["SOCK_DGRAM"]
           SocketSeqPacket -> ["SOCK_SEQPACKET"]
-          SocketRaw       -> ["SOCK_RAW"]
-          SocketRDM       -> ["SOCK_RDM"]
-          SocketPacket    -> ["SOCK_PACKET"]
+          SocketRaw -> ["SOCK_RAW"]
+          SocketRDM -> ["SOCK_RDM"]
+          SocketPacket -> ["SOCK_PACKET"]
       nonBlock = if sdNonBlock then ["SOCK_NONBLOCK"] else []
       cloExec = if sdCloExec then ["SOCK_CLOEXEC"] else []
 
