@@ -1,3 +1,4 @@
+# When changing the resolver, also update shell.nix accordingly!
 resolver: lts-13.6
 packages:
 - .
@@ -8,3 +9,6 @@ extra-deps:
   commit: d2d7e06d85965dd022705d3d4e8348940afabb5f
 
 allow-newer: true
+
+nix:
+  shell-file: shell.nix
