@@ -24,7 +24,7 @@ void socket_fail(int sock)
 
 void die_usage(void)
 {
-  fprintf(stderr, "Usage: sockets <socket | socketpair>\n");
+  fprintf(stderr, "Usage: sockets <socket | socketpair | sendrecv>\n");
   exit(1);
 }
 
