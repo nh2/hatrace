@@ -76,6 +76,7 @@ test-suite hatrace-test
                      , filepath
                      , hatrace
                      , hspec
+                     , hspec-jenkins
                      , process
                      , temporary
                      , text

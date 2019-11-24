@@ -2,6 +2,7 @@ resolver: lts-13.6
 packages:
 - .
 extra-deps:
+- hspec-jenkins-0.1.1@sha256:f9fdd10566702f34c28918d93fc9160be730f8fd8fa8aeedb3776e8663b41731,703
 - git: https://github.com/nh2/linux-ptrace
   commit: 8969355c2e1ce095ef58acc5f2c5f8a4ea3f1645
 - git: https://github.com/nh2/posix-waitpid.git
