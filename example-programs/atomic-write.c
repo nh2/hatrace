@@ -64,7 +64,7 @@ int main(int argc, char const *argv[])
   }
 
   // Parse atomic argument
-  bool atomic;
+  bool atomic = false;
   if (strcmp(argv[1], "atomic") == 0) {
     atomic = true;
   } else if (strcmp(argv[1], "non-atomic") == 0) {
