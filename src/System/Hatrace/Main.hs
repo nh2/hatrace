@@ -104,7 +104,7 @@ main = do
       exitWith exitCode
     FilterMode FilterAtomicWrites -> do
       argv <- procToArgv cliProgram cliArgs
-      (exitCode, entries) <- sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+      (exitCode, entries) <- sourceRawTraceForkExecvFullPathWithSink argv atomicWritesSink
       let ignoredPath [] = error "paths are not supposed to be empty"
           ignoredPath ('/':fromRoot) =
             head (splitPath fromRoot) `elem` ["proc/", "dev/", "sys/"]

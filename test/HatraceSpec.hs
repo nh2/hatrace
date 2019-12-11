@@ -10,6 +10,7 @@ module HatraceSpec where
 import           Control.Monad (when)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
@@ -113,19 +114,19 @@ spec = before_ assertNoChildren $ do
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
 
-  describe "sourceTraceForkExecvFullPathWithSink" $ do
+  describe "sourceRawTraceForkExecvFullPathWithSink" $ do
 
     it "lets the process finish if the sink exits early" $ do
       argv <- procToArgv "echo" ["hello"]
-      (exitCode, ()) <- sourceTraceForkExecvFullPathWithSink argv (return ())
+      (exitCode, ()) <- sourceRawTraceForkExecvFullPathWithSink argv (return ())
       exitCode `shouldBe` ExitSuccess
 
     it "allows obtaining all syscalls as a list for hello.asm" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
       argv <- procToArgv "example-programs-build/hello-linux-x86_64" []
-      (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+      (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
 
-      let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
+      let syscalls = [ syscall | (_pid, SyscallStop SyscallEnter (syscall, _args)) <- events ]
       exitCode `shouldBe` ExitSuccess
       syscalls `shouldBe`
         [ KnownSyscall Syscall_execve
@@ -137,8 +138,8 @@ spec = before_ assertNoChildren $ do
       callProcess "make" ["--quiet", "example-programs-build/write-EBADF"]
       argv <- procToArgv "example-programs-build/write-EBADF" []
       (exitCode, events) <-
-        sourceTraceForkExecvFullPathWithSink argv $
-          syscallExitDetailsOnlyConduit .| CL.consume
+        sourceRawTraceForkExecvFullPathWithSink argv $
+          syscallRawExitDetailsOnlyConduit .| CL.consume
       let writeErrnos =
             -- We filter for writes, as the test program is written in C and
             -- may make some syscalls that set errno, e.g.
@@ -158,10 +159,10 @@ spec = before_ assertNoChildren $ do
         -- otherwise bash will just execve() and not fork() at all, in which case
         -- this test wouldn't actually test tracing into subprocesses.
         argv <- procToArgv "bash" ["-c", "example-programs-build/hello-linux-x86_64 && true"]
-        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+        (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
         let cloneWriteSyscalls =
               [ syscall
-              | (_pid, SyscallStop (SyscallEnter (KnownSyscall syscall, _args))) <- events
+              | (_pid, SyscallStop SyscallEnter (KnownSyscall syscall, _args)) <- events
               , syscall `elem` [Syscall_clone, Syscall_write]
               ]
         exitCode `shouldBe` ExitSuccess
@@ -184,8 +185,8 @@ spec = before_ assertNoChildren $ do
       let getSyscallsSetFor :: [String] -> IO (Set Syscall)
           getSyscallsSetFor args = do
             argv <- procToArgv "example-programs-build/atomic-write" args
-            (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
-            let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
+            (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
+            let syscalls = [ syscall | (_pid, SyscallStop SyscallEnter (syscall, _args)) <- events ]
             exitCode `shouldBe` ExitSuccess
             return (Set.fromList syscalls)
 
@@ -211,7 +212,7 @@ spec = before_ assertNoChildren $ do
             let numBytes = 100 :: Int
             argv <- procToArgv "example-programs-build/atomic-write" [atomicityFlag, show numBytes, targetFile]
 
-            let isWrite (_pid, SyscallStop (SyscallEnter (KnownSyscall Syscall_write, _args))) = True
+            let isWrite (_pid, SyscallStop SyscallEnter (KnownSyscall Syscall_write, _args)) = True
                 isWrite _ = False
 
             -- We have to use SIGTERM and cannot use SIGKILL as of writing,
@@ -227,7 +228,7 @@ spec = before_ assertNoChildren $ do
                 killAt4thWriteConduit =
                   CC.filter isWrite .| (CC.drop 3 >> killConduit)
 
-            _ <- sourceTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
+            _ <- sourceRawTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
 
             return ()
 
@@ -370,7 +371,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "test-output"
         argv <- procToArgv "example-programs-build/atomic-write" ["atomic", "10", tmpFile]
         (exitCode, writes) <-
-          sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+          sourceRawTraceForkExecvFullPathWithSink argv atomicWritesSink
         exitCode `shouldBe` ExitSuccess
         case Map.lookup tmpFile writes of
           Just (AtomicWrite _) -> return ()
@@ -382,7 +383,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "test-output"
         argv <- procToArgv "example-programs-build/atomic-write" ["non-atomic", "10", tmpFile]
         (exitCode, writes) <-
-          sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+          sourceRawTraceForkExecvFullPathWithSink argv atomicWritesSink
         exitCode `shouldBe` ExitSuccess
         Map.lookup tmpFile writes `shouldBe` Just NonatomicWrite
 
@@ -466,15 +467,15 @@ spec = before_ assertNoChildren $ do
 
        it "Syscall_exit_group is identified" $ do
          argv <- procToArgv "true" []
-         (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+         (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
 
-         let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
+         let syscalls = [ syscall | (_pid, SyscallStop SyscallEnter (syscall, _args)) <- events ]
          exitCode `shouldBe` ExitSuccess
          syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_exit_group `elem` xs)
 
     describe "execve" $ do
 
-      let runExecveProgram :: FilePath -> FilePath -> IO (ExitCode, [SyscallExitDetails_execve])
+      let runExecveProgram :: FilePath -> FilePath -> IO (ExitCode, [(ByteString, Int)])
           runExecveProgram execveProgram programToExecve = do
             innerArgv <- procToArgv programToExecve []
             argv <- procToArgv execveProgram innerArgv
@@ -482,39 +483,43 @@ spec = before_ assertNoChildren $ do
               sourceTraceForkExecvFullPathWithSink argv $
                 syscallExitDetailsOnlyConduit .| CL.consume
             let execveDetails =
-                  [ detail
-                  | (_pid, Right (DetailedSyscallExit_execve detail)) <- events
+                  [ (filenameBS, fromIntegral execveResult)
+                  | ( _pid
+                    , Right (DetailedSyscallExit_execve
+                             SyscallExitDetails_execve
+                               { optionalEnterDetail = Just SyscallEnterDetails_execve
+                                   { filenameBS }
+                               , execveResult})
+                    ) <- events
                   ]
             return (exitCode, execveDetails)
 
       it "shows the right execve results for './execve hello-linux-x86_64'" $ do
 
-        callProcess "make" ["--quiet", "example-programs-build/execve", "example-programs-build/hello-linux-x86_64"]
-        (exitCode, execveDetails) <-
-          runExecveProgram
-            "example-programs-build/execve"
-            "example-programs-build/hello-linux-x86_64"
+        let program1 = "example-programs-build/execve"
+            program2 = "example-programs-build/hello-linux-x86_64"
+        callProcess "make" ["--quiet", program1, program2]
+        (exitCode, execveDetails) <- runExecveProgram program1 program2
         exitCode `shouldBe` ExitSuccess
         -- There should be one execve() for our C program being started by the
         -- test process, and one by the program that it execve()s.
         execveDetails `shouldBe`
-          [ SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
-          , SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
+          [ (T.encodeUtf8 $ T.pack program1, 0)
+          , (T.encodeUtf8 $ T.pack program2, 0)
           ]
 
       it "shows the right execve results for the special case './execve-linux-null-envp hello-linux-x86_64'" $ do
 
-        callProcess "make" ["--quiet", "example-programs-build/execve-linux-null-envp", "example-programs-build/hello-linux-x86_64"]
-        (exitCode, execveDetails) <-
-          runExecveProgram
-            "example-programs-build/execve-linux-null-envp"
-            "example-programs-build/hello-linux-x86_64"
+        let program1 = "example-programs-build/execve-linux-null-envp"
+            program2 = "example-programs-build/hello-linux-x86_64"
+        callProcess "make" ["--quiet", program1, program2]
+        (exitCode, execveDetails) <- runExecveProgram program1 program2
         exitCode `shouldBe` ExitSuccess
         -- There should be one execve() for our C program being started by the
         -- test process, and one by the program that it execve()s.
         execveDetails `shouldBe`
-          [ SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
-          , SyscallExitDetails_execve {optionalEnterDetail = Nothing, execveResult = 0}
+          [ (T.encodeUtf8 $ T.pack program1, 0)
+          , (T.encodeUtf8 $ T.pack program2, 0)
           ]
 
 
