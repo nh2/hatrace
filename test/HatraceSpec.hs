@@ -113,17 +113,17 @@ spec = before_ assertNoChildren $ do
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
 
-  describe "sourceTraceForkExecvFullPathWithSink" $ do
+  describe "sourceBaseTraceForkExecvFullPathWithSink" $ do
 
     it "lets the process finish if the sink exits early" $ do
       argv <- procToArgv "echo" ["hello"]
-      (exitCode, ()) <- sourceTraceForkExecvFullPathWithSink argv (return ())
+      (exitCode, ()) <- sourceBaseTraceForkExecvFullPathWithSink argv (return ())
       exitCode `shouldBe` ExitSuccess
 
     it "allows obtaining all syscalls as a list for hello.asm" $ do
       callProcess "make" ["--quiet", "example-programs-build/hello-linux-x86_64"]
       argv <- procToArgv "example-programs-build/hello-linux-x86_64" []
-      (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+      (exitCode, events) <- sourceBaseTraceForkExecvFullPathWithSink argv CL.consume
 
       let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
       exitCode `shouldBe` ExitSuccess
@@ -137,7 +137,7 @@ spec = before_ assertNoChildren $ do
       callProcess "make" ["--quiet", "example-programs-build/write-EBADF"]
       argv <- procToArgv "example-programs-build/write-EBADF" []
       (exitCode, events) <-
-        sourceTraceForkExecvFullPathWithSink argv $
+        sourceBaseTraceForkExecvFullPathWithSink argv $
           syscallExitDetailsOnlyConduit .| CL.consume
       let writeErrnos =
             -- We filter for writes, as the test program is written in C and
@@ -158,7 +158,7 @@ spec = before_ assertNoChildren $ do
         -- otherwise bash will just execve() and not fork() at all, in which case
         -- this test wouldn't actually test tracing into subprocesses.
         argv <- procToArgv "bash" ["-c", "example-programs-build/hello-linux-x86_64 && true"]
-        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+        (exitCode, events) <- sourceBaseTraceForkExecvFullPathWithSink argv CL.consume
         let cloneWriteSyscalls =
               [ syscall
               | (_pid, SyscallStop (SyscallEnter (KnownSyscall syscall, _args))) <- events
@@ -184,7 +184,7 @@ spec = before_ assertNoChildren $ do
       let getSyscallsSetFor :: [String] -> IO (Set Syscall)
           getSyscallsSetFor args = do
             argv <- procToArgv "example-programs-build/atomic-write" args
-            (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+            (exitCode, events) <- sourceBaseTraceForkExecvFullPathWithSink argv CL.consume
             let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
             exitCode `shouldBe` ExitSuccess
             return (Set.fromList syscalls)
@@ -227,7 +227,7 @@ spec = before_ assertNoChildren $ do
                 killAt4thWriteConduit =
                   CC.filter isWrite .| (CC.drop 3 >> killConduit)
 
-            _ <- sourceTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
+            _ <- sourceBaseTraceForkExecvFullPathWithSink argv killAt4thWriteConduit
 
             return ()
 
@@ -333,7 +333,7 @@ spec = before_ assertNoChildren $ do
                     sendSignal pid sigTERM
 
             (exitCode, ()) <-
-              sourceTraceForkExecvFullPathWithSink argv $
+              sourceBaseTraceForkExecvFullPathWithSink argv $
                    syscallExitDetailsOnlyConduit
                 .| objectFileWriteFilterConduit
                 .| (CL.take 3 >> killConduit)
@@ -370,7 +370,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "test-output"
         argv <- procToArgv "example-programs-build/atomic-write" ["atomic", "10", tmpFile]
         (exitCode, writes) <-
-          sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+          sourceBaseTraceForkExecvFullPathWithSink argv atomicWritesSink
         exitCode `shouldBe` ExitSuccess
         case Map.lookup tmpFile writes of
           Just (AtomicWrite _) -> return ()
@@ -382,7 +382,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "test-output"
         argv <- procToArgv "example-programs-build/atomic-write" ["non-atomic", "10", tmpFile]
         (exitCode, writes) <-
-          sourceTraceForkExecvFullPathWithSink argv atomicWritesSink
+          sourceBaseTraceForkExecvFullPathWithSink argv atomicWritesSink
         exitCode `shouldBe` ExitSuccess
         Map.lookup tmpFile writes `shouldBe` Just NonatomicWrite
 
@@ -407,7 +407,7 @@ spec = before_ assertNoChildren $ do
         -- the syscall, which should be changed and this change needs to be
         -- visible in the traced program
         (exitCode, _) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .|
             changeWriteSyscallResult (Left $ foreignErrnoToERRNO injectedErrno) .|
             CL.consume
@@ -424,7 +424,7 @@ spec = before_ assertNoChildren $ do
         -- the syscall, which should be changed and this change needs to be
         -- visible in the traced program
         (exitCode, _) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .|
             changeWriteSyscallResult (Right $ fromIntegral newRetValue) .|
             CL.consume
@@ -444,7 +444,7 @@ spec = before_ assertNoChildren $ do
       it "has the right output for 'echo hello | cat'" $ do
         argv <- procToArgv "bash" ["-c", "echo hello | cat > /dev/null"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         let stdinReads =
               [ bufContents
@@ -466,7 +466,7 @@ spec = before_ assertNoChildren $ do
 
        it "Syscall_exit_group is identified" $ do
          argv <- procToArgv "true" []
-         (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv CL.consume
+         (exitCode, events) <- sourceBaseTraceForkExecvFullPathWithSink argv CL.consume
 
          let syscalls = [ syscall | (_pid, SyscallStop (SyscallEnter (syscall, _args))) <- events ]
          exitCode `shouldBe` ExitSuccess
@@ -479,7 +479,7 @@ spec = before_ assertNoChildren $ do
             innerArgv <- procToArgv programToExecve []
             argv <- procToArgv execveProgram innerArgv
             (exitCode, events) <-
-              sourceTraceForkExecvFullPathWithSink argv $
+              sourceBaseTraceForkExecvFullPathWithSink argv $
                 syscallExitDetailsOnlyConduit .| CL.consume
             let execveDetails =
                   [ detail
@@ -522,7 +522,7 @@ spec = before_ assertNoChildren $ do
       it "seen at least for 1 file for 'cat /dev/null'" $ do
         argv <- procToArgv "cat" ["/dev/null"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let closeEvents =
@@ -539,7 +539,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "test-output"
         argv <- procToArgv "example-programs-build/atomic-write" ["non-atomic", "10", tmpFile]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         -- Some libcs use `open()`, some `openat()`.
@@ -570,7 +570,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "test-output"
         argv <- procToArgv "example-programs-build/atomic-write" ["atomic", "10", tmpFile]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let renameToTmpFileEvents =
@@ -590,7 +590,7 @@ spec = before_ assertNoChildren $ do
         let testProgram = "example-programs-build/unlink"
         callProcess "make" ["--quiet", testProgram]
         argv <- procToArgv testProgram [fileToUnlink]
-        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv $
+        (exitCode, events) <- sourceBaseTraceForkExecvFullPathWithSink argv $
           syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let unlinkedFiles =
@@ -609,7 +609,7 @@ spec = before_ assertNoChildren $ do
       it "seen when piping output in bash" $ do
         argv <- procToArgv "bash" ["-c", "echo 'foo' | cat"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let pipeEvents =
@@ -628,7 +628,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", accessItself]
         argv <- procToArgv accessItself []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let accessModesRequested =
@@ -648,7 +648,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", sockets]
         argv <- procToArgv sockets ["socket"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let args =
@@ -667,7 +667,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", sockets]
         argv <- procToArgv sockets ["socketpair"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let args =
@@ -685,7 +685,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", sockets]
         argv <- procToArgv sockets ["sendrecv"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let recv =
@@ -710,7 +710,7 @@ spec = before_ assertNoChildren $ do
       it "seen called by stat executable" $ do
         argv <- procToArgv "stat" ["/dev/null"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let pathsLstatRequested =
@@ -729,7 +729,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", mmapSyscall]
         argv <- procToArgv mmapSyscall []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let mmapArguments =
@@ -753,7 +753,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", mmapSyscall]
         argv <- procToArgv mmapSyscall []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let munmapArguments =
@@ -772,7 +772,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", "example-programs-build/trigger-time"]
         argv <- procToArgv "example-programs-build/trigger-time" ["--quiet"]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let timeDetails =
@@ -791,7 +791,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", brkCall]
         argv <- procToArgv brkCall []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let brkCallAddresses =
@@ -815,7 +815,7 @@ spec = before_ assertNoChildren $ do
         let symlinkPath = tmpFile ++ "symlink"
         argv <- procToArgv "bash" ["-c", "ln -s " ++ tmpFile ++ " " ++ symlinkPath]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         -- it was observed that on different distros 'ln -s' could use either
@@ -847,7 +847,7 @@ spec = before_ assertNoChildren $ do
         let symlinkPath = tmpFile ++ "symlink"
         argv <- procToArgv "example-programs-build/symlinkat" [tmpFile, symlinkPath]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let symlinkEvents =
@@ -868,7 +868,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "temp-file"
         argv <- procToArgv pollCall [tmpFile]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let pollResult = [ (nfds, fdsValue)
@@ -897,7 +897,7 @@ spec = before_ assertNoChildren $ do
         tmpFile <- emptySystemTempFile "temp-file"
         argv <- procToArgv pollCall [tmpFile]
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallEnterDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let pollResult = [ (fdsValue, sigmaskValue)
@@ -917,7 +917,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", "example-programs-build/get-fs"]
         argv <- procToArgv "example-programs-build/get-fs" []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let subfunctions =
@@ -936,7 +936,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", progName]
         argv <- procToArgv progName []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let sets =
@@ -955,7 +955,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", progName]
         argv <- procToArgv progName []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let sysinfoDetails =
@@ -974,7 +974,7 @@ spec = before_ assertNoChildren $ do
         callProcess "make" ["--quiet", progName]
         argv <- procToArgv progName []
         (exitCode, events) <-
-          sourceTraceForkExecvFullPathWithSink argv $
+          sourceBaseTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let readAccess = noAccess { accessProtectionRead = True }
