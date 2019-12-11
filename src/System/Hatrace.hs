@@ -16,7 +16,9 @@
 module System.Hatrace
   ( traceForkProcess
   , traceForkExecvFullPath
+  , sourceRawTraceForkExecvFullPathWithSink
   , sourceTraceForkExecvFullPathWithSink
+  , genericSourceTraceForkExecvFullPathWithSink
   , procToArgv
   , forkExecvWithPtrace
   , formatHatraceEventConduit
@@ -115,7 +117,9 @@ module System.Hatrace
   , getSyscallEnterDetails
   , setExitedSyscallResult
   , syscallEnterDetailsOnlyConduit
+  , syscallRawEnterDetailsOnlyConduit
   , syscallExitDetailsOnlyConduit
+  , syscallRawExitDetailsOnlyConduit
   , FileWriteEvent(..)
   , fileWritesConduit
   , FileWriteBehavior(..)
@@ -133,7 +137,7 @@ module System.Hatrace
   , KnownSyscall(..)
   ) where
 
-import           Conduit (foldlC)
+import           Conduit (concatMapC, foldlC)
 import           Control.Arrow (second)
 import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
@@ -185,7 +189,7 @@ import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.Format
 import           System.Hatrace.Signals (signalMap)
-import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallName, syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
 import           System.Hatrace.Types
 
 
@@ -293,8 +297,13 @@ forkExecvWithPtrace args = do
 -- Already uses `runInBoundThread` internally, so using this ensures that you
 -- don't accidentally run a @ptrace()@ call from an OS thread that's not the
 -- tracer of the started process.
-sourceTraceForkExecvFullPathWithSink :: (MonadUnliftIO m) => [String] -> ConduitT (CPid, TraceEvent) Void m a -> m (ExitCode, a)
-sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
+genericSourceTraceForkExecvFullPathWithSink ::
+     (MonadUnliftIO m)
+  => [String]
+  -> (CPid -> IO details)
+  -> ConduitT (CPid, TraceEvent details) Void m a
+  -> m (ExitCode, a)
+genericSourceTraceForkExecvFullPathWithSink args getDetails sink = runInBoundThread $ do
   childPid <- liftIO $ forkExecvWithPtrace args
   -- Now the child is stopped. Set options, then start it.
   liftIO $ annotatePtrace "ptrace_setoptions" $ ptrace_setoptions childPid
@@ -318,14 +327,14 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
 
   exitCodeRef <- newIORef (Nothing :: Maybe ExitCode)
   let loop state = do
-        (newState, (returnedPid, event)) <- liftIO $ waitForTraceEvent state
+        (newState, (returnedPid, event)) <- liftIO $ waitForTraceEvent state getDetails
 
         yield (returnedPid, event)
 
         -- Cases in which we have to restart the tracee
         -- (by calling `ptrace_syscall` again).
         liftIO $ case event of
-          SyscallStop _enterOrExit -> do
+          SyscallStop _enterOrExit _details -> do
             -- Tell the process to continue into / out of the syscall,
             -- and generate another event at the next syscall or signal.
             ptrace_syscall returnedPid Nothing
@@ -371,7 +380,7 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
       -- TODO: We probably have to do that for all tracees.
       preDetachWaitpidResult <- waitpid childPid []
       case preDetachWaitpidResult of
-        Nothing -> error "sourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
+        Nothing -> error "genericSourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
         Just{} -> do
           -- TODO as the man page says:
           --        PTRACE_DETACH  is a restarting operation; therefore it requires the tracee to be in ptrace-stop.
@@ -390,12 +399,27 @@ sourceTraceForkExecvFullPathWithSink args sink = runInBoundThread $ do
           ptrace_detach childPid
           waitpidResult <- waitpidFullStatus childPid []
           case waitpidResult of
-            Nothing -> error "sourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
+            Nothing -> error "genericSourceTraceForkExecvFullPathWithSink: BUG: no PID was returned by waitpid"
             Just (_returnedPid, status, FullStatus fullStatus) -> case status of
               Exited 0 -> pure ExitSuccess
               _ -> pure $ ExitFailure (fromIntegral fullStatus)
   return (finalExitCode, a)
 
+sourceTraceForkExecvFullPathWithSink ::
+     (MonadUnliftIO m)
+  => [String]
+  -> ConduitT (CPid, TraceEvent EnterDetails) Void m a
+  -> m (ExitCode, a)
+sourceTraceForkExecvFullPathWithSink args sink =
+  genericSourceTraceForkExecvFullPathWithSink args getEnterDetails sink
+
+sourceRawTraceForkExecvFullPathWithSink ::
+     (MonadUnliftIO m)
+  => [String]
+  -> ConduitT (CPid, TraceEvent (Syscall, SyscallArgs)) Void m a
+  -> m (ExitCode, a)
+sourceRawTraceForkExecvFullPathWithSink args sink =
+  genericSourceTraceForkExecvFullPathWithSink args getEnteredSyscall sink
 
 wordToPtr :: Word -> Ptr a
 wordToPtr w = wordPtrToPtr (fromIntegral w)
@@ -934,7 +958,7 @@ instance SyscallExitFormatting SyscallExitDetails_execve where
         Just SyscallEnterDetails_execve{ filenameBS, argvList, envpList } ->
           [formatArg filenameBS, formatArg argvList, formatArg envpList]
         Nothing ->
-          [argPlaceholder "TODO implement remembering arguments"]
+          [argPlaceholder "getRawSyscallExitDetails was used thus no enter details could be found"]
 
 data SyscallEnterDetails_symlink = SyscallEnterDetails_symlink
   { target :: Ptr CChar
@@ -1568,6 +1592,24 @@ data DetailedSyscallExit
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
+data EnterDetails
+  = KnownEnterDetails !KnownSyscall DetailedSyscallEnter
+  | UnknownEnterDetails !Word64 !SyscallArgs
+  deriving (Eq, Ord, Show)
+
+enterDetailsToSyscall :: EnterDetails -> Syscall
+enterDetailsToSyscall details = case details of
+  KnownEnterDetails known _ -> KnownSyscall known
+  UnknownEnterDetails unknown _ -> UnknownSyscall unknown
+
+getEnterDetails :: CPid -> IO EnterDetails
+getEnterDetails pid = do
+  (syscall, syscallArgs) <- getEnteredSyscall pid
+  case syscall of
+    KnownSyscall knownSyscall ->
+      KnownEnterDetails knownSyscall <$> getSyscallEnterDetails knownSyscall syscallArgs pid
+    UnknownSyscall unknown ->
+      pure $ UnknownEnterDetails unknown syscallArgs
 
 getSyscallEnterDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallEnter
 getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in case syscall of
@@ -2023,284 +2065,281 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
-getSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
-getSyscallExitDetails knownSyscall syscallArgs pid = do
+getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
+getRawSyscallExitDetails knownSyscall syscallArgs pid = do
 
   (result, mbErrno) <- getExitedSyscallResult pid
 
   case mbErrno of
     Just errno -> return $ Left errno
     Nothing ->
-      -- For some syscalls we must not try to get the enter details at their exit,
+      -- For the execve syscall we must not try to get the enter details at their exit,
       -- because the registers involved are invalidated.
-      -- TODO: Address this by not re-fetching the enter details at all, but by
-      --       remembering them in a PID map.
-      Right <$> getSyscallExitDetails' knownSyscall syscallArgs result pid
-
-getSyscallExitDetails' :: KnownSyscall -> SyscallArgs -> Word64 -> CPid -> IO DetailedSyscallExit
-getSyscallExitDetails' knownSyscall syscallArgs result pid =
+      -- TODO: check if there are any other syscalls with such a problem.
       case knownSyscall of
         Syscall_execve | result == 0 -> do
           -- The execve() worked, we cannot get its enter details, as the
           -- registers involved are invalidated because the process image
           -- has been replaced.
-          pure $ DetailedSyscallExit_execve
+          pure $ Right $ DetailedSyscallExit_execve
             SyscallExitDetails_execve{ optionalEnterDetail = Nothing, execveResult = fromIntegral result }
         _ -> do
-          -- For all other syscalls, we can get the enter details.
-
           detailedSyscallEnter <- getSyscallEnterDetails knownSyscall syscallArgs pid
+          Right <$> getSyscallExitDetails detailedSyscallEnter result pid
 
-          case detailedSyscallEnter of
+getSyscallExitDetails :: DetailedSyscallEnter -> Word64 -> CPid -> IO DetailedSyscallExit
+getSyscallExitDetails detailedSyscallEnter result pid =
+  case detailedSyscallEnter of
 
-            DetailedSyscallEnter_open
-              enterDetail@SyscallEnterDetails_open{} -> do
-                pure $ DetailedSyscallExit_open $
-                  SyscallExitDetails_open{ enterDetail, fd = fromIntegral result }
+    DetailedSyscallEnter_open
+      enterDetail@SyscallEnterDetails_open{} -> do
+        pure $ DetailedSyscallExit_open $
+          SyscallExitDetails_open{ enterDetail, fd = fromIntegral result }
 
-            DetailedSyscallEnter_openat
-              enterDetail@SyscallEnterDetails_openat{} -> do
-                pure $ DetailedSyscallExit_openat $
-                  SyscallExitDetails_openat{ enterDetail, fd = fromIntegral result }
+    DetailedSyscallEnter_openat
+      enterDetail@SyscallEnterDetails_openat{} -> do
+        pure $ DetailedSyscallExit_openat $
+          SyscallExitDetails_openat{ enterDetail, fd = fromIntegral result }
 
-            DetailedSyscallEnter_creat
-              enterDetail@SyscallEnterDetails_creat{} -> do
-                pure $ DetailedSyscallExit_creat $
-                  SyscallExitDetails_creat{ enterDetail, fd = fromIntegral result }
+    DetailedSyscallEnter_creat
+      enterDetail@SyscallEnterDetails_creat{} -> do
+        pure $ DetailedSyscallExit_creat $
+          SyscallExitDetails_creat{ enterDetail, fd = fromIntegral result }
 
-            DetailedSyscallEnter_pipe
-              enterDetail@SyscallEnterDetails_pipe{ pipefd } -> do
-                (readfd, writefd) <- readPipeFds pid pipefd
-                pure $ DetailedSyscallExit_pipe $
-                  SyscallExitDetails_pipe{ enterDetail, readfd, writefd }
+    DetailedSyscallEnter_pipe
+      enterDetail@SyscallEnterDetails_pipe{ pipefd } -> do
+        (readfd, writefd) <- readPipeFds pid pipefd
+        pure $ DetailedSyscallExit_pipe $
+          SyscallExitDetails_pipe{ enterDetail, readfd, writefd }
 
-            DetailedSyscallEnter_pipe2
-              enterDetail@SyscallEnterDetails_pipe2{ pipefd } -> do
-                (readfd, writefd) <- readPipeFds pid pipefd
-                pure $ DetailedSyscallExit_pipe2 $
-                  SyscallExitDetails_pipe2{ enterDetail, readfd, writefd }
+    DetailedSyscallEnter_pipe2
+      enterDetail@SyscallEnterDetails_pipe2{ pipefd } -> do
+        (readfd, writefd) <- readPipeFds pid pipefd
+        pure $ DetailedSyscallExit_pipe2 $
+          SyscallExitDetails_pipe2{ enterDetail, readfd, writefd }
 
-            DetailedSyscallEnter_write
-              enterDetail@SyscallEnterDetails_write{} -> do
-                pure $ DetailedSyscallExit_write $
-                  SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
+    DetailedSyscallEnter_write
+      enterDetail@SyscallEnterDetails_write{} -> do
+        pure $ DetailedSyscallExit_write $
+          SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
 
-            DetailedSyscallEnter_access
-              enterDetail@SyscallEnterDetails_access{} -> do
-                pure $ DetailedSyscallExit_access $
-                  SyscallExitDetails_access{ enterDetail }
+    DetailedSyscallEnter_access
+      enterDetail@SyscallEnterDetails_access{} -> do
+        pure $ DetailedSyscallExit_access $
+          SyscallExitDetails_access{ enterDetail }
 
-            DetailedSyscallEnter_faccessat
-              enterDetail@SyscallEnterDetails_faccessat{} -> do
-                pure $ DetailedSyscallExit_faccessat $
-                  SyscallExitDetails_faccessat{ enterDetail }
+    DetailedSyscallEnter_faccessat
+      enterDetail@SyscallEnterDetails_faccessat{} -> do
+        pure $ DetailedSyscallExit_faccessat $
+          SyscallExitDetails_faccessat{ enterDetail }
 
-            DetailedSyscallEnter_read
-              enterDetail@SyscallEnterDetails_read{ buf } -> do
-                bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
-                pure $ DetailedSyscallExit_read $
-                  SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
+    DetailedSyscallEnter_read
+      enterDetail@SyscallEnterDetails_read{ buf } -> do
+        bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+        pure $ DetailedSyscallExit_read $
+          SyscallExitDetails_read{ enterDetail, readCount = fromIntegral result, bufContents }
 
-            DetailedSyscallEnter_execve
-              enterDetail@SyscallEnterDetails_execve{} -> do
-                pure $ DetailedSyscallExit_execve $
-                  SyscallExitDetails_execve{ optionalEnterDetail = Just enterDetail, execveResult = fromIntegral result }
+    DetailedSyscallEnter_execve
+      enterDetail@SyscallEnterDetails_execve{} -> do
 
-            DetailedSyscallEnter_close
-              enterDetail@SyscallEnterDetails_close{} -> do
-                pure $ DetailedSyscallExit_close $
-                  SyscallExitDetails_close{ enterDetail }
+        pure $ DetailedSyscallExit_execve $
+          SyscallExitDetails_execve{ optionalEnterDetail = Just enterDetail, execveResult = fromIntegral result }
 
-            DetailedSyscallEnter_rename
-              enterDetail@SyscallEnterDetails_rename{} -> do
-                pure $ DetailedSyscallExit_rename $
-                  SyscallExitDetails_rename{ enterDetail }
+    DetailedSyscallEnter_close
+      enterDetail@SyscallEnterDetails_close{} -> do
+        pure $ DetailedSyscallExit_close $
+          SyscallExitDetails_close{ enterDetail }
 
-            DetailedSyscallEnter_renameat
-              enterDetail@SyscallEnterDetails_renameat{} -> do
-                pure $ DetailedSyscallExit_renameat $
-                  SyscallExitDetails_renameat{ enterDetail }
+    DetailedSyscallEnter_rename
+      enterDetail@SyscallEnterDetails_rename{} -> do
+        pure $ DetailedSyscallExit_rename $
+          SyscallExitDetails_rename{ enterDetail }
 
-            DetailedSyscallEnter_renameat2
-              enterDetail@SyscallEnterDetails_renameat2{} -> do
-                pure $ DetailedSyscallExit_renameat2 $
-                  SyscallExitDetails_renameat2{ enterDetail }
+    DetailedSyscallEnter_renameat
+      enterDetail@SyscallEnterDetails_renameat{} -> do
+        pure $ DetailedSyscallExit_renameat $
+          SyscallExitDetails_renameat{ enterDetail }
 
-            DetailedSyscallEnter_unlink
-              enterDetail@SyscallEnterDetails_unlink{} -> do
-                pure $ DetailedSyscallExit_unlink $
-                  SyscallExitDetails_unlink { enterDetail }
+    DetailedSyscallEnter_renameat2
+      enterDetail@SyscallEnterDetails_renameat2{} -> do
+        pure $ DetailedSyscallExit_renameat2 $
+          SyscallExitDetails_renameat2{ enterDetail }
 
-            DetailedSyscallEnter_unlinkat
-              enterDetail@SyscallEnterDetails_unlinkat{} -> do
-                pure $ DetailedSyscallExit_unlinkat $
-                  SyscallExitDetails_unlinkat { enterDetail }
+    DetailedSyscallEnter_unlink
+      enterDetail@SyscallEnterDetails_unlink{} -> do
+        pure $ DetailedSyscallExit_unlink $
+          SyscallExitDetails_unlink { enterDetail }
 
-            DetailedSyscallEnter_stat
-              enterDetail@SyscallEnterDetails_stat{statbuf} -> do
-                stat <- Ptrace.peek (TracedProcess pid) statbuf
-                pure $ DetailedSyscallExit_stat $
-                  SyscallExitDetails_stat{ enterDetail, stat }
+    DetailedSyscallEnter_unlinkat
+      enterDetail@SyscallEnterDetails_unlinkat{} -> do
+        pure $ DetailedSyscallExit_unlinkat $
+          SyscallExitDetails_unlinkat { enterDetail }
 
-            DetailedSyscallEnter_fstat
-              enterDetail@SyscallEnterDetails_fstat{statbuf} -> do
-                stat <- Ptrace.peek (TracedProcess pid) statbuf
-                pure $ DetailedSyscallExit_fstat $
-                  SyscallExitDetails_fstat{ enterDetail, stat }
+    DetailedSyscallEnter_stat
+      enterDetail@SyscallEnterDetails_stat{statbuf} -> do
+        stat <- Ptrace.peek (TracedProcess pid) statbuf
+        pure $ DetailedSyscallExit_stat $
+          SyscallExitDetails_stat{ enterDetail, stat }
 
-            DetailedSyscallEnter_lstat
-              enterDetail@SyscallEnterDetails_lstat{statbuf} -> do
-                stat <- Ptrace.peek (TracedProcess pid) statbuf
-                pure $ DetailedSyscallExit_lstat $
-                  SyscallExitDetails_lstat{ enterDetail, stat }
+    DetailedSyscallEnter_fstat
+      enterDetail@SyscallEnterDetails_fstat{statbuf} -> do
+        stat <- Ptrace.peek (TracedProcess pid) statbuf
+        pure $ DetailedSyscallExit_fstat $
+          SyscallExitDetails_fstat{ enterDetail, stat }
 
-            DetailedSyscallEnter_newfstatat
-              enterDetail@SyscallEnterDetails_newfstatat{statbuf} -> do
-                stat <- Ptrace.peek (TracedProcess pid) statbuf
-                pure $ DetailedSyscallExit_newfstatat $
-                  SyscallExitDetails_newfstatat{ enterDetail, stat }
+    DetailedSyscallEnter_lstat
+      enterDetail@SyscallEnterDetails_lstat{statbuf} -> do
+        stat <- Ptrace.peek (TracedProcess pid) statbuf
+        pure $ DetailedSyscallExit_lstat $
+          SyscallExitDetails_lstat{ enterDetail, stat }
 
-            DetailedSyscallEnter_exit
-              enterDetail@SyscallEnterDetails_exit{} -> do
-                pure $ DetailedSyscallExit_exit $ SyscallExitDetails_exit { enterDetail }
+    DetailedSyscallEnter_newfstatat
+      enterDetail@SyscallEnterDetails_newfstatat{statbuf} -> do
+        stat <- Ptrace.peek (TracedProcess pid) statbuf
+        pure $ DetailedSyscallExit_newfstatat $
+          SyscallExitDetails_newfstatat{ enterDetail, stat }
 
-            DetailedSyscallEnter_exit_group
-              enterDetail@SyscallEnterDetails_exit_group{} -> do
-                pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
+    DetailedSyscallEnter_exit
+      enterDetail@SyscallEnterDetails_exit{} -> do
+        pure $ DetailedSyscallExit_exit $ SyscallExitDetails_exit { enterDetail }
 
-            DetailedSyscallEnter_socket
-              enterDetail@SyscallEnterDetails_socket{} -> do
-                pure $ DetailedSyscallExit_socket $
-                  SyscallExitDetails_socket{ enterDetail, fd = fromIntegral result }
+    DetailedSyscallEnter_exit_group
+      enterDetail@SyscallEnterDetails_exit_group{} -> do
+        pure $ DetailedSyscallExit_exit_group $ SyscallExitDetails_exit_group { enterDetail }
 
-            DetailedSyscallEnter_listen
-              enterDetail@SyscallEnterDetails_listen{} -> do
-                pure $ DetailedSyscallExit_listen $
-                  SyscallExitDetails_listen{ enterDetail }
+    DetailedSyscallEnter_socket
+      enterDetail@SyscallEnterDetails_socket{} -> do
+        pure $ DetailedSyscallExit_socket $
+          SyscallExitDetails_socket{ enterDetail, fd = fromIntegral result }
 
-            DetailedSyscallEnter_shutdown
-              enterDetail@SyscallEnterDetails_shutdown{} -> do
-                pure $ DetailedSyscallExit_shutdown $
-                  SyscallExitDetails_shutdown{ enterDetail }
+    DetailedSyscallEnter_listen
+      enterDetail@SyscallEnterDetails_listen{} -> do
+        pure $ DetailedSyscallExit_listen $
+          SyscallExitDetails_listen{ enterDetail }
 
-            DetailedSyscallEnter_send
-              enterDetail@SyscallEnterDetails_send{} -> do
-                pure $ DetailedSyscallExit_send $
-                  SyscallExitDetails_send{ enterDetail, numSent = fromIntegral result }
+    DetailedSyscallEnter_shutdown
+      enterDetail@SyscallEnterDetails_shutdown{} -> do
+        pure $ DetailedSyscallExit_shutdown $
+          SyscallExitDetails_shutdown{ enterDetail }
 
-            DetailedSyscallEnter_sendto
-              enterDetail@SyscallEnterDetails_sendto{} -> do
-                pure $ DetailedSyscallExit_sendto $
-                  SyscallExitDetails_sendto{ enterDetail, numSent = fromIntegral result }
+    DetailedSyscallEnter_send
+      enterDetail@SyscallEnterDetails_send{} -> do
+        pure $ DetailedSyscallExit_send $
+          SyscallExitDetails_send{ enterDetail, numSent = fromIntegral result }
 
-            DetailedSyscallEnter_recv
-              enterDetail@SyscallEnterDetails_recv{ buf } -> do
-                bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
-                pure $ DetailedSyscallExit_recv $
-                  SyscallExitDetails_recv{ enterDetail, numReceived = fromIntegral result, bufContents }
+    DetailedSyscallEnter_sendto
+      enterDetail@SyscallEnterDetails_sendto{} -> do
+        pure $ DetailedSyscallExit_sendto $
+          SyscallExitDetails_sendto{ enterDetail, numSent = fromIntegral result }
 
-            DetailedSyscallEnter_recvfrom
-              enterDetail@SyscallEnterDetails_recvfrom{ buf } -> do
-                bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
-                pure $ DetailedSyscallExit_recvfrom $
-                  SyscallExitDetails_recvfrom{ enterDetail, numReceived = fromIntegral result, bufContents }
+    DetailedSyscallEnter_recv
+      enterDetail@SyscallEnterDetails_recv{ buf } -> do
+        bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+        pure $ DetailedSyscallExit_recv $
+          SyscallExitDetails_recv{ enterDetail, numReceived = fromIntegral result, bufContents }
 
-            DetailedSyscallEnter_socketpair
-              enterDetail@SyscallEnterDetails_socketpair{ sv } -> do
-                (sockfd1, sockfd2) <- readPipeFds pid sv -- TODO correct?
-                pure $ DetailedSyscallExit_socketpair $
-                  SyscallExitDetails_socketpair{ enterDetail, sockfd1, sockfd2 }
+    DetailedSyscallEnter_recvfrom
+      enterDetail@SyscallEnterDetails_recvfrom{ buf } -> do
+        bufContents <- peekBytes (TracedProcess pid) buf (fromIntegral result)
+        pure $ DetailedSyscallExit_recvfrom $
+          SyscallExitDetails_recvfrom{ enterDetail, numReceived = fromIntegral result, bufContents }
 
-            DetailedSyscallEnter_mmap
-              enterDetail@SyscallEnterDetails_mmap{} -> do
-                pure $ DetailedSyscallExit_mmap $
-                    SyscallExitDetails_mmap{ enterDetail, mappedArea = word64ToPtr result }
+    DetailedSyscallEnter_socketpair
+      enterDetail@SyscallEnterDetails_socketpair{ sv } -> do
+        (sockfd1, sockfd2) <- readPipeFds pid sv -- TODO correct?
+        pure $ DetailedSyscallExit_socketpair $
+          SyscallExitDetails_socketpair{ enterDetail, sockfd1, sockfd2 }
 
-            DetailedSyscallEnter_munmap
-              enterDetail@SyscallEnterDetails_munmap{} -> do
-                pure $ DetailedSyscallExit_munmap $
-                    SyscallExitDetails_munmap{ enterDetail }
+    DetailedSyscallEnter_mmap
+      enterDetail@SyscallEnterDetails_mmap{} -> do
+        pure $ DetailedSyscallExit_mmap $
+            SyscallExitDetails_mmap{ enterDetail, mappedArea = word64ToPtr result }
 
-            DetailedSyscallEnter_symlink
-              enterDetail@SyscallEnterDetails_symlink{} -> do
-                pure $ DetailedSyscallExit_symlink $
-                  SyscallExitDetails_symlink{ enterDetail }
+    DetailedSyscallEnter_munmap
+      enterDetail@SyscallEnterDetails_munmap{} -> do
+        pure $ DetailedSyscallExit_munmap $
+            SyscallExitDetails_munmap{ enterDetail }
 
-            DetailedSyscallEnter_symlinkat
-              enterDetail@SyscallEnterDetails_symlinkat{} -> do
-                pure $ DetailedSyscallExit_symlinkat $
-                  SyscallExitDetails_symlinkat{ enterDetail }
+    DetailedSyscallEnter_symlink
+      enterDetail@SyscallEnterDetails_symlink{} -> do
+        pure $ DetailedSyscallExit_symlink $
+          SyscallExitDetails_symlink{ enterDetail }
 
-            DetailedSyscallEnter_time
-              enterDetail@SyscallEnterDetails_time{} -> do
-                pure $ DetailedSyscallExit_time $
-                  SyscallExitDetails_time
-                    { enterDetail
-                    , timeResult = fromIntegral result
-                    }
+    DetailedSyscallEnter_symlinkat
+      enterDetail@SyscallEnterDetails_symlinkat{} -> do
+        pure $ DetailedSyscallExit_symlinkat $
+          SyscallExitDetails_symlinkat{ enterDetail }
 
-            DetailedSyscallEnter_brk
-              enterDetail@SyscallEnterDetails_brk{} -> do
-                pure $ DetailedSyscallExit_brk $
-                  SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
+    DetailedSyscallEnter_time
+      enterDetail@SyscallEnterDetails_time{} -> do
+        pure $ DetailedSyscallExit_time $
+          SyscallExitDetails_time
+            { enterDetail
+            , timeResult = fromIntegral result
+            }
 
-            DetailedSyscallEnter_arch_prctl
-              enterDetail@SyscallEnterDetails_arch_prctl{ addr } -> do
-                addrValue <- case addr of
-                  ArchPrctlAddrArgVal value -> pure value
-                  ArchPrctlAddrArgPtr ptr -> peek (TracedProcess pid) ptr
-                  -- this shouldn't happen so we don't want to complicate
-                  -- the types because of this improbable scenario
-                  ArchPrctlAddrArgUnknown _ -> pure 0
-                pure $ DetailedSyscallExit_arch_prctl $
-                  SyscallExitDetails_arch_prctl{ enterDetail, addrValue }
+    DetailedSyscallEnter_brk
+      enterDetail@SyscallEnterDetails_brk{} -> do
+        pure $ DetailedSyscallExit_brk $
+          SyscallExitDetails_brk{ enterDetail, brkResult = word64ToPtr result }
 
-            DetailedSyscallEnter_set_tid_address
-              enterDetail@SyscallEnterDetails_set_tid_address{ } -> do
-                pure $ DetailedSyscallExit_set_tid_address $
-                  SyscallExitDetails_set_tid_address
-                    { enterDetail
-                    , tidResult = fromIntegral result
-                    }
+    DetailedSyscallEnter_arch_prctl
+      enterDetail@SyscallEnterDetails_arch_prctl{ addr } -> do
+        addrValue <- case addr of
+          ArchPrctlAddrArgVal value -> pure value
+          ArchPrctlAddrArgPtr ptr -> peek (TracedProcess pid) ptr
+          -- this shouldn't happen so we don't want to complicate
+          -- the types because of this improbable scenario
+          ArchPrctlAddrArgUnknown _ -> pure 0
+        pure $ DetailedSyscallExit_arch_prctl $
+          SyscallExitDetails_arch_prctl{ enterDetail, addrValue }
 
-            DetailedSyscallEnter_sysinfo
-              enterDetail@SyscallEnterDetails_sysinfo{ info } -> do
-                sysinfo <- peek (TracedProcess pid) info
-                pure $ DetailedSyscallExit_sysinfo $
-                  SyscallExitDetails_sysinfo{ enterDetail, sysinfo }
+    DetailedSyscallEnter_set_tid_address
+      enterDetail@SyscallEnterDetails_set_tid_address{ } -> do
+        pure $ DetailedSyscallExit_set_tid_address $
+          SyscallExitDetails_set_tid_address
+            { enterDetail
+            , tidResult = fromIntegral result
+            }
 
-            DetailedSyscallEnter_poll
-              enterDetail@SyscallEnterDetails_poll{ fds, nfds } -> do
-                -- This capping to max int below is a consequence of nfds var being a long,
-                -- while peekArray taking as an argument just an int. The assumption made
-                -- in here is that the number of checked fds will be less than max int.
-                let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
-                fdsValue <- peekArray (TracedProcess pid) n fds
-                pure $ DetailedSyscallExit_poll $
-                  SyscallExitDetails_poll{ enterDetail, fdsValue }
+    DetailedSyscallEnter_sysinfo
+      enterDetail@SyscallEnterDetails_sysinfo{ info } -> do
+        sysinfo <- peek (TracedProcess pid) info
+        pure $ DetailedSyscallExit_sysinfo $
+          SyscallExitDetails_sysinfo{ enterDetail, sysinfo }
 
-            DetailedSyscallEnter_ppoll
-              enterDetail@SyscallEnterDetails_ppoll{ fds, nfds } -> do
-                -- This capping to max int below is a consequence of nfds var being a long,
-                -- while peekArray taking as an argument just an int. The assumption made
-                -- in here is that the number of checked fds will be less than max int.
-                let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
-                fdsValue <- peekArray (TracedProcess pid) n fds
-                pure $ DetailedSyscallExit_ppoll $
-                  SyscallExitDetails_ppoll{ enterDetail, fdsValue }
+    DetailedSyscallEnter_poll
+      enterDetail@SyscallEnterDetails_poll{ fds, nfds } -> do
+        -- This capping to max int below is a consequence of nfds var being a long,
+        -- while peekArray taking as an argument just an int. The assumption made
+        -- in here is that the number of checked fds will be less than max int.
+        let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+        fdsValue <- peekArray (TracedProcess pid) n fds
+        pure $ DetailedSyscallExit_poll $
+          SyscallExitDetails_poll{ enterDetail, fdsValue }
 
-            DetailedSyscallEnter_mprotect
-              enterDetail@SyscallEnterDetails_mprotect{ } -> do
-                pure $ DetailedSyscallExit_mprotect $
-                  SyscallExitDetails_mprotect{ enterDetail }
+    DetailedSyscallEnter_ppoll
+      enterDetail@SyscallEnterDetails_ppoll{ fds, nfds } -> do
+        -- This capping to max int below is a consequence of nfds var being a long,
+        -- while peekArray taking as an argument just an int. The assumption made
+        -- in here is that the number of checked fds will be less than max int.
+        let n = fromIntegral $ min nfds $ fromIntegral (maxBound :: Int)
+        fdsValue <- peekArray (TracedProcess pid) n fds
+        pure $ DetailedSyscallExit_ppoll $
+          SyscallExitDetails_ppoll{ enterDetail, fdsValue }
 
-            DetailedSyscallEnter_pkey_mprotect
-              enterDetail@SyscallEnterDetails_pkey_mprotect{ } -> do
-                pure $ DetailedSyscallExit_pkey_mprotect $
-                  SyscallExitDetails_pkey_mprotect{ enterDetail }
+    DetailedSyscallEnter_mprotect
+      enterDetail@SyscallEnterDetails_mprotect{ } -> do
+        pure $ DetailedSyscallExit_mprotect $
+          SyscallExitDetails_mprotect{ enterDetail }
 
-            DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
-              pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+    DetailedSyscallEnter_pkey_mprotect
+      enterDetail@SyscallEnterDetails_pkey_mprotect{ } -> do
+        pure $ DetailedSyscallExit_pkey_mprotect $
+          SyscallExitDetails_pkey_mprotect{ enterDetail }
+
+    DetailedSyscallEnter_unimplemented syscall syscallArgs ->
+      pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
 
 peekArray :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
 peekArray pid size ptr
@@ -2321,19 +2360,58 @@ readPipeFds pid pipefd = do
   withForeignPtr ptr $ \p -> do
     (,) <$> peekByteOff p off <*> peekByteOff p (off + fdSize)
 
-syscallEnterDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, DetailedSyscallEnter) m ()
-syscallEnterDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
-  SyscallStop (SyscallEnter (KnownSyscall syscall, syscallArgs)) -> do
+syscallRawEnterDetailsOnlyConduit ::
+     (MonadIO m)
+  => ConduitT (CPid, TraceEvent (Syscall, SyscallArgs)) (CPid, DetailedSyscallEnter) m ()
+syscallRawEnterDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
+  SyscallStop SyscallEnter (KnownSyscall syscall, syscallArgs) -> do
     detailedSyscallEnter <- liftIO $ getSyscallEnterDetails syscall syscallArgs pid
     yield (pid, detailedSyscallEnter)
   _ -> return () -- skip
 
+syscallEnterDetailsOnlyConduit ::
+     (MonadIO m)
+  => ConduitT (CPid, TraceEvent EnterDetails) (CPid, DetailedSyscallEnter) m ()
+syscallEnterDetailsOnlyConduit = concatMapC $ \(pid, event) -> case event of
+  SyscallStop SyscallEnter (KnownEnterDetails _ detailedSyscallEnter) ->
+    Just (pid, detailedSyscallEnter)
+  _ -> Nothing -- skip
 
-syscallExitDetailsOnlyConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (CPid, (Either (Syscall, ERRNO) DetailedSyscallExit)) m ()
-syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
-  SyscallStop (SyscallExit (syscall@(KnownSyscall knownSyscall), syscallArgs)) -> do
-    eDetailed <- liftIO $ getSyscallExitDetails knownSyscall syscallArgs pid
+
+syscallRawExitDetailsOnlyConduit ::
+     (MonadIO m)
+  => ConduitT
+       (CPid, TraceEvent (Syscall, SyscallArgs))
+       (CPid, (Either (Syscall, ERRNO) DetailedSyscallExit))
+       m
+       ()
+syscallRawExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
+  SyscallStop SyscallExit (syscall@(KnownSyscall knownSyscall), syscallArgs) -> do
+    eDetailed <- liftIO $ getRawSyscallExitDetails knownSyscall syscallArgs pid
     yield (pid, mapLeft (syscall, ) eDetailed)
+  _ -> return () -- skip
+
+syscallExitDetailsOnlyConduit ::
+     (MonadIO m)
+  => ConduitT
+       (CPid, TraceEvent EnterDetails)
+       (CPid, (Either (Syscall, ERRNO) DetailedSyscallExit))
+       m
+       ()
+syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
+  SyscallStop SyscallExit enterDetails -> do
+    (result, mbErrno) <- liftIO $ getExitedSyscallResult pid
+    let syscall = enterDetailsToSyscall enterDetails
+    exitDetailed <- case mbErrno of
+      Just errno -> return $ Left errno
+      Nothing -> do
+        detailed <- case enterDetails of
+          KnownEnterDetails _knownSyscall detailedSyscallEnter ->
+            liftIO $ getSyscallExitDetails detailedSyscallEnter result pid
+          UnknownEnterDetails unknown syscallArgs ->
+            return $ DetailedSyscallExit_unimplemented syscall syscallArgs unknown
+        return $ Right detailed
+    yield (pid, mapLeft (syscall, ) exitDetailed)
   _ -> return () -- skip
 
 foreign import ccall unsafe "string.h strerror" c_strerror :: CInt -> IO (Ptr CChar)
@@ -2354,7 +2432,7 @@ traceForkExecvFullPath args printer = do
   let formattingSink = formatHatraceEventConduit .| CL.mapM printer .| CL.sinkNull
 
   (exitCode, ()) <-
-    sourceTraceForkExecvFullPathWithSink args formattingSink
+    genericSourceTraceForkExecvFullPathWithSink args getEnterDetails formattingSink
   return exitCode
 
 -- | Like the partial `T.decodeUtf8`, with `HasCallStack`.
@@ -2389,13 +2467,19 @@ data FileWriteEvent
 -- NOTES:
 -- * only calls to `write` are currently used as a marker for writes and syscalls
 --   `pwrite`, `writev`, `pwritev` are not taken into account
-fileWritesConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) (FilePath, FileWriteEvent) m ()
+fileWritesConduit ::
+     (MonadIO m)
+  => ConduitT
+      (CPid, TraceEvent (Syscall, SyscallArgs))
+      (FilePath, FileWriteEvent)
+      m
+      ()
 fileWritesConduit = go
   where
     go =
       await >>= \case
-        Just (pid, SyscallStop (SyscallExit (KnownSyscall syscall, syscallArgs))) -> do
-          detailedSyscallExit <- liftIO $ getSyscallExitDetails syscall syscallArgs pid
+        Just (pid, SyscallStop SyscallExit (KnownSyscall syscall, syscallArgs)) -> do
+          detailedSyscallExit <- liftIO $ getRawSyscallExitDetails syscall syscallArgs pid
           case detailedSyscallExit of
             Right (DetailedSyscallExit_open SyscallExitDetails_open
                    { enterDetail = SyscallEnterDetails_open { pathnameBS }
@@ -2411,7 +2495,7 @@ fileWritesConduit = go
               yieldFdEvent pid fd (FileOpen pathnameBS)
             _ -> return ()
           go
-        Just (pid, SyscallStop (SyscallEnter (KnownSyscall syscall, syscallArgs))) -> do
+        Just (pid, SyscallStop SyscallEnter (KnownSyscall syscall, syscallArgs)) -> do
           detailedSyscallEnter <- liftIO $ getSyscallEnterDetails syscall syscallArgs pid
           case detailedSyscallEnter of
             DetailedSyscallEnter_write SyscallEnterDetails_write { fd } ->
@@ -2492,7 +2576,9 @@ analyzeWrites es = checkOpen es
       Unexpected $ "expected " ++ expected ++ ", but " ++
                    show real ++ " was seen"
 
-atomicWritesSink :: (MonadIO m) => ConduitT (CPid, TraceEvent) Void m (Map FilePath FileWriteBehavior)
+atomicWritesSink ::
+     (MonadIO m)
+  => ConduitT (CPid, TraceEvent (Syscall, SyscallArgs)) Void m (Map FilePath FileWriteBehavior)
 atomicWritesSink =
   extract <$> (fileWritesConduit .| foldlC collectWrite Map.empty)
   where
@@ -2572,19 +2658,21 @@ instance ToJSON ReturnOrErrno where
                                ]
            ]
 
-formatHatraceEventConduit :: (MonadIO m) => ConduitT (CPid, TraceEvent) HatraceEvent m ()
+formatHatraceEventConduit ::
+     (MonadIO m)
+  => ConduitT (CPid, TraceEvent EnterDetails) HatraceEvent m ()
 formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
   case event of
 
-    SyscallStop enterOrExit -> case enterOrExit of
-
-      SyscallEnter (syscall, syscallArgs) -> do
-        formatted <- liftIO $ formatSyscallEnter syscall syscallArgs pid
-        return $ HatraceEvent pid (EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
-
-      SyscallExit (syscall, syscallArgs) -> do
-        (formatted, outcome) <- liftIO $ formatSyscallExit syscall syscallArgs pid
-        return $ HatraceEvent pid (EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
+    SyscallStop enterOrExit enterDetails -> do
+      let syscall = enterDetailsToSyscall enterDetails
+      case enterOrExit of
+        SyscallEnter -> do
+          let formatted = formatSyscallEnter enterDetails
+          return $ HatraceEvent pid (EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
+        SyscallExit -> do
+          (formatted, outcome) <- liftIO $ formatSyscallExit enterDetails pid
+          return $ HatraceEvent pid (EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
 
     PTRACE_EVENT_Stop ptraceEvent ->
       return $ HatraceEvent pid (EventPTraceEvent ptraceEvent)
@@ -2636,14 +2724,13 @@ printHatraceEventJson hatraceEvent = do
   BS.putStr $ BSL.toStrict $ encode hatraceEvent <> "\n"
 
 
-formatSyscallEnter :: Syscall -> SyscallArgs -> CPid -> IO FormattedSyscall
-formatSyscallEnter syscall syscallArgs pid =
-  case syscall of
-    UnknownSyscall number ->
-      pure $ FormattedSyscall ("unknown_syscall_" ++ show number) (unimplementedArgs syscallArgs)
-    KnownSyscall knownSyscall -> do
-      detailed <- getSyscallEnterDetails knownSyscall syscallArgs pid
-      pure $ case detailed of
+formatSyscallEnter :: EnterDetails -> FormattedSyscall
+formatSyscallEnter enterDetails =
+  case enterDetails of
+    UnknownEnterDetails number syscallArgs ->
+      FormattedSyscall ("unknown_syscall_" ++ show number) (unimplementedArgs syscallArgs)
+    KnownEnterDetails _knownSyscall detailed ->
+      case detailed of
         DetailedSyscallEnter_open details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_openat details -> syscallEnterToFormatted details
@@ -2738,32 +2825,25 @@ unimplementedArgs :: SyscallArgs -> [FormattedArg]
 unimplementedArgs args =
   [ formatArg (argN args) | argN <- [arg0, arg1, arg2, arg3, arg4, arg5] ]
 
-formatSyscallExit :: Syscall -> SyscallArgs -> CPid -> IO (FormattedSyscall, ReturnOrErrno)
-formatSyscallExit syscall syscallArgs pid = do
+formatSyscallExit :: EnterDetails -> CPid -> IO (FormattedSyscall, ReturnOrErrno)
+formatSyscallExit enterDetails pid = do
   (result, mbErrno) <- getExitedSyscallResult pid
 
-  let unknownExit name = definedArgsExit name (unimplementedArgs syscallArgs)
+  let unknownExit syscallArgs name = definedArgsExit name (unimplementedArgs syscallArgs)
       definedArgsExit name args = do
         err <- case mbErrno of
           Nothing -> pure $ ProperReturn NoReturn
           Just errno -> ErrnoResult errno <$> strError errno
         pure (FormattedSyscall name args, err)
 
-  case syscall of
-    UnknownSyscall number ->
-      unknownExit $ "unknown_syscall(" ++ show number ++ ")"
-       -- For some syscalls we must not try to get the enter details at their exit,
-       -- because the registers involved are invalidated.
-       -- TODO: Address this by not re-fetching the enter details at all, but by
-    KnownSyscall knownSyscall ->
-      case mbErrno of
-        Just _erno ->
-          definedArgsExit (syscallName knownSyscall)
-                          [ argPlaceholder "TODO implement remembering arguments" ]
-        Nothing -> do
-          details <- getSyscallExitDetails' knownSyscall syscallArgs result pid
-          formatDetailedSyscallExit details $ \_syscall _syscallArgs _result ->
-            unknownExit $ "unimplemented_syscall(" ++ show syscall ++ ")"
+  case enterDetails of
+    UnknownEnterDetails number syscallArgs ->
+      unknownExit syscallArgs $ "unknown_syscall(" ++ show number ++ ")"
+
+    KnownEnterDetails _knownSyscall detailed -> do
+      details <- getSyscallExitDetails detailed result pid
+      formatDetailedSyscallExit details $ \syscall syscallArgs _result ->
+        unknownExit syscallArgs $ "unimplemented_syscall(" ++ show syscall ++ ")"
 
 formatDetailedSyscallExit ::
      DetailedSyscallExit
@@ -2890,8 +2970,8 @@ traceForkProcess name args printEvent = do
 
 -- | The terminology in here is oriented on `man 2 ptrace`.
 data SyscallStopType
-  = SyscallEnter (Syscall, SyscallArgs)
-  | SyscallExit (Syscall, SyscallArgs) -- ^ contains the args from when the syscall was entered
+  = SyscallEnter
+  | SyscallExit
   deriving (Eq, Ord, Show)
 
 
@@ -2922,8 +3002,8 @@ instance ToJSON PTRACE_EVENT where
 
 
 -- | The terminology in here is oriented on `man 2 ptrace`.
-data TraceEvent
-  = SyscallStop SyscallStopType
+data TraceEvent stopDetails
+  = SyscallStop SyscallStopType stopDetails
   | PTRACE_EVENT_Stop PTRACE_EVENT -- TODO change this to carry detail information with each event, e.g. what pid was clone()d
   | GroupStop Signal
   | SignalDeliveryStop Signal
@@ -2948,12 +3028,12 @@ data TraceEvent
 -- > PTRACE_SYSCALL, syscall-exit-stop is not generated.
 --
 -- We use this data structure to track it.
-data TraceState = TraceState
-  { currentSyscalls :: !(Map CPid (Syscall, SyscallArgs)) -- ^ must be removed from the map if (it's present and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@)
+data TraceState enterDetails = TraceState
+  { currentSyscalls :: !(Map CPid enterDetails) -- ^ must be removed from the map if (it's present and the next @ptrace()@ invocation is not @PTRACE_SYSCALL@)
   } deriving (Eq, Ord, Show)
 
 
-initialTraceState :: TraceState
+initialTraceState :: TraceState a
 initialTraceState =
   TraceState
     { currentSyscalls = Map.empty
@@ -3041,8 +3121,12 @@ ptrace_GETSIGINFO_isGroupStop pid = alloca $ \ptr -> do
   pure $ res == -1 && errno == eINVAL
 
 
-waitForTraceEvent :: (HasCallStack) => TraceState -> IO (TraceState, (CPid, TraceEvent))
-waitForTraceEvent state@TraceState{ currentSyscalls } = do
+waitForTraceEvent ::
+     (HasCallStack)
+  => TraceState a
+  -> (CPid -> IO a)
+  -> IO (TraceState a, (CPid, TraceEvent a))
+waitForTraceEvent state@TraceState{ currentSyscalls } getDetails = do
 
   -- Using `AllChildren` (`__WALL`), as `man 2 ptrace` recommends and
   -- like `strace` does.
@@ -3079,10 +3163,10 @@ waitForTraceEvent state@TraceState{ currentSyscalls } = do
 
           if
             | sig == (sigTRAP .|. 0x80) -> case Map.lookup returnedPid currentSyscalls of
-                Just callAndArgs -> pure (state{ currentSyscalls = Map.delete returnedPid currentSyscalls }, SyscallStop (SyscallExit callAndArgs))
+                Just callAndArgs -> pure (state{ currentSyscalls = Map.delete returnedPid currentSyscalls }, SyscallStop SyscallExit callAndArgs)
                 Nothing -> do
-                  callAndArgs <- getEnteredSyscall returnedPid
-                  pure (state{ currentSyscalls = Map.insert returnedPid callAndArgs currentSyscalls }, SyscallStop (SyscallEnter callAndArgs))
+                  callAndArgs <- getDetails returnedPid
+                  pure (state{ currentSyscalls = Map.insert returnedPid callAndArgs currentSyscalls }, SyscallStop SyscallEnter callAndArgs)
             | sig == sigTRAP -> if
                 -- For each special PTRACE_EVENT_* we want to catch here,
                 -- remember in needs to be enabled first via `ptrace_setoptions`.
