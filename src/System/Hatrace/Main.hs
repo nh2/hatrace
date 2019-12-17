@@ -43,9 +43,9 @@ data OutputOptions
 
 cliArgsParser :: Parser CLIArgs
 cliArgsParser = do
+  cliRunMode <- modeParser
   cliProgram <- argument str (metavar "PROGRAM")
   cliArgs <- many (argument str (metavar "PROGRAM_ARG"))
-  cliRunMode <- modeParser
   pure $ CLIArgs{ cliProgram, cliArgs, cliRunMode }
 
 modeParser :: Parser RunMode
@@ -84,7 +84,9 @@ parseArgs :: IO CLIArgs
 parseArgs = Opts.execParser $
   Opts.info
     (Opts.helper <*> cliArgsParser)
-    (Opts.fullDesc <> Opts.progDesc "scriptable strace - trace system calls, signals and more")
+    (Opts.forwardOptions
+     <> Opts.fullDesc
+     <> Opts.progDesc "scriptable strace - trace system calls, signals and more")
 
 
 main :: IO ()
