@@ -110,6 +110,8 @@ module System.Hatrace
   , SyscallExitDetails_mprotect(..)
   , SyscallEnterDetails_pkey_mprotect(..)
   , SyscallExitDetails_pkey_mprotect(..)
+  , SyscallEnterDetails_sched_yield(..)
+  , SyscallExitDetails_sched_yield(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1497,6 +1499,22 @@ instance SyscallExitFormatting SyscallExitDetails_socketpair where
       SyscallEnterDetails_socketpair{ addressFamily, socketType, protocol } = enterDetail
 
 
+data SyscallEnterDetails_sched_yield = SyscallEnterDetails_sched_yield
+  deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_sched_yield where
+  syscallEnterToFormatted SyscallEnterDetails_sched_yield =
+    FormattedSyscall "sched_yield" []
+
+
+data SyscallExitDetails_sched_yield = SyscallExitDetails_sched_yield
+  deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_sched_yield where
+  syscallExitToFormatted SyscallExitDetails_sched_yield =
+    (syscallEnterToFormatted SyscallEnterDetails_sched_yield, NoReturn)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1541,6 +1559,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_ppoll SyscallEnterDetails_ppoll
   | DetailedSyscallEnter_mprotect SyscallEnterDetails_mprotect
   | DetailedSyscallEnter_pkey_mprotect SyscallEnterDetails_pkey_mprotect
+  | DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1589,6 +1608,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_ppoll SyscallExitDetails_ppoll
   | DetailedSyscallExit_mprotect SyscallExitDetails_mprotect
   | DetailedSyscallExit_pkey_mprotect SyscallExitDetails_pkey_mprotect
+  | DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2063,6 +2083,8 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , pkey = fromIntegral pkey
       , protection = fromCInt prot
       }
+  Syscall_sched_yield -> do
+    pure $ DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2337,6 +2359,9 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_pkey_mprotect{ } -> do
         pure $ DetailedSyscallExit_pkey_mprotect $
           SyscallExitDetails_pkey_mprotect{ enterDetail }
+
+    DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield -> do
+        pure $ DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -2817,6 +2842,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_socketpair details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_sched_yield details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2936,6 +2963,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_recvfrom details -> formatDetails details
 
     DetailedSyscallExit_socketpair details -> formatDetails details
+
+    DetailedSyscallExit_sched_yield details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
