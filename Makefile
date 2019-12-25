@@ -27,6 +27,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/set-tid-address
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sysinfo-loads
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mprotect
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/unlink
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sched_yield
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)

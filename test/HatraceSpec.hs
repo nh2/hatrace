@@ -993,3 +993,20 @@ spec = before_ assertNoChildren $ do
               , protection == AccessProtectionKnown readAccess
               ]
         length mprotects `shouldBe` 1
+
+    describe "sched_yield" $ do
+      it "seen sched_yield used by example executable" $ do
+        let progName = "example-programs-build/sched_yield"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let sched_yields =
+              [ details
+              | (_pid
+                , Right (DetailedSyscallExit_sched_yield details)
+                ) <- events
+              ]
+        length sched_yields `shouldBe` 1
