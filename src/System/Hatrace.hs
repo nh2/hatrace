@@ -110,6 +110,8 @@ module System.Hatrace
   , SyscallExitDetails_mprotect(..)
   , SyscallEnterDetails_pkey_mprotect(..)
   , SyscallExitDetails_pkey_mprotect(..)
+  , SyscallEnterDetails_kill(..)
+  , SyscallExitDetails_kill(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1496,6 +1498,25 @@ instance SyscallExitFormatting SyscallExitDetails_socketpair where
     where
       SyscallEnterDetails_socketpair{ addressFamily, socketType, protocol } = enterDetail
 
+data SyscallEnterDetails_kill = SyscallEnterDetails_kill
+  { pid :: CPid
+  , sig :: Signal
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_kill where
+  syscallEnterToFormatted SyscallEnterDetails_kill{ pid, sig } =
+    let signalString = case snd <$> Map.lookup sig signalMap of
+          Just s  -> "SIG" <> s
+          Nothing -> show sig
+    in FormattedSyscall "kill" [ formatArg pid, FixedStringArg signalString]
+
+data SyscallExitDetails_kill = SyscallExitDetails_kill
+  { enterDetail :: SyscallEnterDetails_kill
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_kill where
+  syscallExitToFormatted SyscallExitDetails_kill{ enterDetail } =
+    ( syscallEnterToFormatted enterDetail, NoReturn )
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -1541,6 +1562,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_ppoll SyscallEnterDetails_ppoll
   | DetailedSyscallEnter_mprotect SyscallEnterDetails_mprotect
   | DetailedSyscallEnter_pkey_mprotect SyscallEnterDetails_pkey_mprotect
+  | DetailedSyscallEnter_kill SyscallEnterDetails_kill
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1589,6 +1611,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_ppoll SyscallExitDetails_ppoll
   | DetailedSyscallExit_mprotect SyscallExitDetails_mprotect
   | DetailedSyscallExit_pkey_mprotect SyscallExitDetails_pkey_mprotect
+  | DetailedSyscallExit_kill SyscallExitDetails_kill
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2063,6 +2086,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , pkey = fromIntegral pkey
       , protection = fromCInt prot
       }
+  Syscall_kill -> do
+    let SyscallArgs{ arg0 = cpid, arg1 = signal } = syscallArgs
+    pure $ DetailedSyscallEnter_kill $ SyscallEnterDetails_kill
+      { pid = fromIntegral cpid
+      , sig = fromIntegral signal
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2337,6 +2366,11 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_pkey_mprotect{ } -> do
         pure $ DetailedSyscallExit_pkey_mprotect $
           SyscallExitDetails_pkey_mprotect{ enterDetail }
+
+    DetailedSyscallEnter_kill
+      enterDetail@SyscallEnterDetails_kill{ } -> do
+        pure $ DetailedSyscallExit_kill $
+          SyscallExitDetails_kill{ enterDetail }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -2817,6 +2851,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_socketpair details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_kill details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -2936,6 +2972,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_recvfrom details -> formatDetails details
 
     DetailedSyscallExit_socketpair details -> formatDetails details
+
+    DetailedSyscallExit_kill details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
