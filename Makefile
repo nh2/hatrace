@@ -28,6 +28,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sysinfo-loads
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mprotect
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/unlink
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sched_yield
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/kill
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)

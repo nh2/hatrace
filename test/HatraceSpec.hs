@@ -1010,3 +1010,23 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         length sched_yields `shouldBe` 1
+
+    describe "kill" $ do
+      it "seen kill used by example executable" $ do
+        let progName = "example-programs-build/kill"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let kills =
+              [ sig
+              | (_pid
+                , Right (DetailedSyscallExit_kill
+                         SyscallExitDetails_kill
+                         { enterDetail = SyscallEnterDetails_kill { sig } })
+                ) <- events
+              , sig == sigUSR1
+              ]
+        length kills `shouldBe` 1
