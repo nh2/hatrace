@@ -27,7 +27,7 @@ import           Data.Void (Void)
 import           Data.Word (Word64)
 import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
 import           Foreign.Ptr (Ptr, nullPtr, ptrToIntPtr)
-import           System.Posix.Types (CMode(..))
+import           System.Posix.Types (CMode(..), CPid(..))
 
 class SyscallEnterFormatting a where
   syscallEnterToFormatted :: a -> FormattedSyscall
@@ -84,6 +84,9 @@ instance ArgFormatting CMode where
 instance ArgFormatting CTime where
   formatArg = FixedStringArg . show .
               posixSecondsToUTCTime . realToFrac
+
+instance ArgFormatting CPid where
+  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting (Ptr Void) where
   formatArg = formatPtrArg "void"
