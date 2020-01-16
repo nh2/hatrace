@@ -1622,6 +1622,16 @@ enterDetailsToSyscall details = case details of
   KnownEnterDetails known _ -> KnownSyscall known
   UnknownEnterDetails unknown _ -> UnknownSyscall unknown
 
+data ExitDetails
+  = KnownExitDetails !KnownSyscall DetailedSyscallExit
+  | UnknownExitDetails !Word64 !SyscallArgs
+  deriving (Eq, Ord, Show)
+
+exitDetailsToSyscall :: ExitDetails -> Syscall
+exitDetailsToSyscall details = case details of
+  KnownExitDetails known _ -> KnownSyscall known
+  UnknownExitDetails unknown _ -> UnknownSyscall unknown
+
 getEnterDetails :: CPid -> IO EnterDetails
 getEnterDetails pid = do
   (syscall, syscallArgs) <- getEnteredSyscall pid
@@ -2635,7 +2645,7 @@ data EventDetails
   deriving (Eq, Ord, Show)
 
 data EventSyscallEnterDetails = EventSyscallEnterDetails
-  { evEnterSyscall :: Syscall
+  { evEnterDetails :: EnterDetails
   , evEnterFormatted :: FormattedSyscall
   } deriving (Eq, Ord, Show)
 
@@ -2643,7 +2653,7 @@ instance ToJSON EventSyscallEnterDetails where
   toJSON = toJSON . evEnterFormatted
 
 data EventSyscallExitDetails = EventSyscallExitDetails
-  { evExitSyscall ::  Syscall
+  { evExitDetails :: ExitDetails
   , evExitFormatted :: FormattedSyscall
   , evExitOutcome :: ReturnOrErrno
   } deriving (Eq, Ord, Show)
@@ -2690,14 +2700,13 @@ formatHatraceEventConduit = CL.mapM $ \(pid, event) -> do
   case event of
 
     SyscallStop enterOrExit enterDetails -> do
-      let syscall = enterDetailsToSyscall enterDetails
       case enterOrExit of
         SyscallEnter -> do
           let formatted = formatSyscallEnter enterDetails
-          return $ HatraceEvent pid (EventSyscallEnter $ EventSyscallEnterDetails syscall formatted)
+          return $ HatraceEvent pid (EventSyscallEnter $ EventSyscallEnterDetails enterDetails formatted)
         SyscallExit -> do
-          (formatted, outcome) <- liftIO $ formatSyscallExit enterDetails pid
-          return $ HatraceEvent pid (EventSyscallExit $ EventSyscallExitDetails syscall formatted outcome)
+          (exitDetails, formatted, outcome) <- liftIO $ formatSyscallExit enterDetails pid
+          return $ HatraceEvent pid (EventSyscallExit $ EventSyscallExitDetails exitDetails formatted outcome)
 
     PTRACE_EVENT_Stop ptraceEvent ->
       return $ HatraceEvent pid (EventPTraceEvent ptraceEvent)
@@ -2715,16 +2724,16 @@ printHatraceEvent :: StringFormattingOptions -> HatraceEvent -> IO ()
 printHatraceEvent formattingOptions (HatraceEvent pid details) = do
   putStr $ show [pid] ++ " "
   case details of
-    EventSyscallEnter enterDetails ->
-      let syscall = evEnterSyscall enterDetails
-          formattedSyscall = evEnterFormatted enterDetails
+    EventSyscallEnter syscallDetails ->
+      let syscall = enterDetailsToSyscall $ evEnterDetails syscallDetails
+          formattedSyscall = evEnterFormatted syscallDetails
       in putStrLn $ "Entering syscall: " ++ show syscall ++ ", details: " ++
            syscallToString formattingOptions formattedSyscall
 
-    EventSyscallExit exitDetails ->
-      let syscall = evExitSyscall exitDetails
-          formattedSyscall = evExitFormatted exitDetails
-          outcome = case evExitOutcome exitDetails of
+    EventSyscallExit syscallDetails ->
+      let syscall = exitDetailsToSyscall $ evExitDetails syscallDetails
+          formattedSyscall = evExitFormatted syscallDetails
+          outcome = case evExitOutcome syscallDetails of
             ProperReturn formattedReturn -> formattedReturn
             ErrnoResult _errno strErr ->
               FormattedReturn $ FixedStringArg $ "-1 (" ++ strErr ++ ")"
@@ -2852,7 +2861,7 @@ unimplementedArgs :: SyscallArgs -> [FormattedArg]
 unimplementedArgs args =
   [ formatArg (argN args) | argN <- [arg0, arg1, arg2, arg3, arg4, arg5] ]
 
-formatSyscallExit :: EnterDetails -> CPid -> IO (FormattedSyscall, ReturnOrErrno)
+formatSyscallExit :: EnterDetails -> CPid -> IO (ExitDetails, FormattedSyscall, ReturnOrErrno)
 formatSyscallExit enterDetails pid = do
   (result, mbErrno) <- getExitedSyscallResult pid
 
@@ -2864,13 +2873,18 @@ formatSyscallExit enterDetails pid = do
         pure (FormattedSyscall name args, err)
 
   case enterDetails of
-    UnknownEnterDetails number syscallArgs ->
-      unknownExit syscallArgs $ "unknown_syscall(" ++ show number ++ ")"
+    UnknownEnterDetails number syscallArgs -> do
+      (formatted, outcome) <-
+        unknownExit syscallArgs $ "unknown_syscall(" ++ show number ++ ")"
+      pure (UnknownExitDetails number syscallArgs, formatted, outcome)
 
-    KnownEnterDetails _knownSyscall detailed -> do
+    KnownEnterDetails knownSyscall detailed -> do
       details <- getSyscallExitDetails detailed result pid
-      formatDetailedSyscallExit details $ \syscall syscallArgs _result ->
-        unknownExit syscallArgs $ "unimplemented_syscall(" ++ show syscall ++ ")"
+      let exitDetails = KnownExitDetails knownSyscall details
+      (formatted, outcome) <-
+        formatDetailedSyscallExit details $ \syscall syscallArgs _result ->
+          unknownExit syscallArgs $ "unimplemented_syscall(" ++ show syscall ++ ")"
+      pure (exitDetails, formatted, outcome)
 
 formatDetailedSyscallExit ::
      DetailedSyscallExit
