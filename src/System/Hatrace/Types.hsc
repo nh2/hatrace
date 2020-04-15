@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- To use `POLLRDHUP` with glibc, `_GNU_SOURCE` must be defined
 -- before any header file imports; see `man 2 poll`.
@@ -14,6 +15,7 @@
 #include <sys/sysinfo.h>
 #include <asm/prctl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 
 module System.Hatrace.Types
@@ -45,6 +47,9 @@ module System.Hatrace.Types
   , GranularSendFlags(..)
   , ReceiveFlags(..)
   , GranularReceiveFlags(..)
+  , CloneFlags(..)
+  , GranularCloneFlags(..)
+  , emptyGranularCloneFlags
   ) where
 
 import           Control.Monad (filterM)
@@ -61,6 +66,7 @@ import           Foreign.Storable (Storable(..))
 import qualified System.Posix.Signals as Signals hiding (inSignalSet)
 import           System.Hatrace.Signals
 import           System.Hatrace.Types.Internal
+import           System.Hatrace.Types.TH
 import           System.Hatrace.Format
 
 
@@ -1263,3 +1269,258 @@ instance ArgFormatting SigSet where
       signalToStringArg =
         fmap (FixedStringArg . snd) . flip Data.Map.lookup signalMap
 
+data CloneFlags
+  = CloneFlagsKnown GranularCloneFlags
+  | CloneFlagsUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data GranularCloneFlags = GranularCloneFlags
+  { cloneChildClearTID :: Bool
+    -- ^ CLONE_CHILD_CLEARTID (since Linux 2.5.49)
+    -- Clear (zero) the child thread ID at the location pointed to by
+    -- child_tid (clone()) or cl_args.child_tid (clone3()) in child
+    -- memory when the child exits, and do a wakeup on the futex at
+    -- that address.
+  , cloneChildSetTID :: Bool
+    -- ^ CLONE_CHILD_SETTID (since Linux 2.5.49)
+    -- Store the child thread ID at the location pointed to by
+    -- child_tid (clone()) or cl_args.child_tid (clone3()) in the
+    -- child's memory.
+#ifdef CLONE_CLEAR_SIGHAND
+  , cloneClearSigHand :: Bool
+    -- ^ CLONE_CLEAR_SIGHAND (since Linux 5.5)
+    -- By default, signal dispositions in the child thread are the
+    -- same as in the parent.  If this flag is specified, then all
+    -- signals that are handled in the parent are reset to their
+    -- default dispositions (SIG_DFL) in the child.
+    -- 
+    -- Specifying this flag together with CLONE_SIGHAND is nonsensi‐
+    -- cal and disallowed.
+#endif
+  , cloneDetached :: Bool
+    -- ^ CLONE_DETACHED (historical)
+    -- This flag is still defined, but it is usually ignored when
+    -- calling clone().  However, see the description of CLONE_PIDFD
+    -- for some exceptions.
+  , cloneFiles :: Bool
+    -- ^ CLONE_FILES (since Linux 2.0)
+    -- If CLONE_FILES is set, the calling process and the child
+    -- process share the same file descriptor table.
+    -- If CLONE_FILES is not set, the child process inherits a copy
+    -- of all file descriptors opened in the calling process at the
+    -- time of the clone call.
+  , cloneFS :: Bool
+    -- ^ CLONE_FS (since Linux 2.0)
+    -- If CLONE_FS is set, the caller and the child process share the
+    -- same filesystem information.  This includes the root of the
+    -- filesystem, the current working directory, and the umask.
+    -- If CLONE_FS is not set, the child process works on a copy of
+    -- the filesystem information of the calling process at the time
+    -- of the clone call.
+  , cloneIO :: Bool
+    -- ^ CLONE_IO (since Linux 2.6.25)
+    -- If CLONE_IO is set, then the new process shares an I/O context
+    -- with the calling process.  If this flag is not set, then (as
+    -- with fork(2)) the new process has its own I/O context.
+  , cloneNewCgroup :: Bool
+    -- ^ CLONE_NEWCGROUP (since Linux 4.6)
+    -- Create the process in a new cgroup namespace.
+  , cloneNewIPC :: Bool
+    -- ^ CLONE_NEWIPC (since Linux 2.6.19)
+    -- If CLONE_NEWIPC is set, then create the process in a new IPC namespace.
+  , cloneNewNet :: Bool
+    -- ^ CLONE_NEWNET (since Linux 2.6.24)
+    -- If CLONE_NEWNET is set, then create the process in a new network namespace.
+  , cloneNewNS :: Bool
+    -- ^ CLONE_NEWNS (since Linux 2.4.19)
+    -- If CLONE_NEWNS is set, the cloned child is started in a new
+    -- mount namespace, initialized with a copy of the namespace of
+    -- the parent.
+  , cloneNewPID :: Bool
+    -- ^ CLONE_NEWPID (since Linux 2.6.24)
+    -- If CLONE_NEWPID is set, then create the process in a new PID namespace.
+  , cloneNewUser :: Bool
+    -- ^ CLONE_NEWUSER
+    -- If CLONE_NEWUSER is set, then create the process in a new user namespace.
+  , cloneNewUTS :: Bool
+    -- ^ CLONE_NEWUTS (since Linux 2.6.19)
+    -- If CLONE_NEWUTS is set, then create the process in a new UTS namespace,
+    -- whose identifiers are initialized by duplicating the identifiers from
+    -- the UTS namespace of the calling process.
+  , cloneParent :: Bool
+    -- ^ CLONE_PARENT (since Linux 2.3.12)
+    -- If CLONE_PARENT is set, then the parent of the new child (as
+    -- returned by getppid(2)) will be the same as that of the call‐
+    -- ing process.
+  , cloneParentSetTID :: Bool
+    -- ^ CLONE_PARENT_SETTID (since Linux 2.5.49)
+    -- Store the child thread ID at the location pointed to by parent_tid
+    -- (clone()) or cl_args.child_tid (clone3()) in the parent's memory.
+#ifdef CLONE_PIDFD
+  , clonePIDFD :: Bool
+    -- ^ CLONE_PIDFD (since Linux 5.2)
+    -- If this flag is specified, a PID file descriptor referring to
+    -- the child process is allocated and placed at a specified loca‐
+    -- tion in the parent's memory.
+#endif
+  , clonePtrace :: Bool
+    -- ^ CLONE_PTRACE (since Linux 2.2)
+    -- If CLONE_PTRACE is specified, and the calling process is being
+    -- traced, then trace the child also (see ptrace(2)).
+  , cloneSetTLS
+    -- ^ CLONE_SETTLS (since Linux 2.5.32)
+    -- The TLS (Thread Local Storage) descriptor is set to tls.
+  , cloneSigHand :: Bool
+    -- ^ CLONE_SIGHAND (since Linux 2.0)
+    -- If CLONE_SIGHAND is set, the calling process and the child
+    -- process share the same table of signal handlers.
+  , cloneSysVSem :: Bool
+    -- ^ CLONE_SYSVSEM (since Linux 2.5.10)
+    -- If CLONE_SYSVSEM is set, then the child and the calling
+    -- process share a single list of System V semaphore adjustment
+    -- (semadj) values (see semop(2)).
+  , cloneThread :: Bool
+    -- ^ CLONE_THREAD (since Linux 2.4.0)
+    -- If CLONE_THREAD is set, the child is placed in the same thread
+    -- group as the calling process.
+  , cloneUntraced :: Bool
+    -- ^ CLONE_UNTRACED (since Linux 2.5.46)
+    -- If CLONE_UNTRACED is specified, then a tracing process cannot
+    -- force CLONE_PTRACE on this child process.
+  , cloneVFork :: Bool
+    -- ^ CLONE_VFORK (since Linux 2.2)
+    -- If CLONE_VFORK is set, the execution of the calling process is
+    -- suspended until the child releases its virtual memory
+    -- resources via a call to execve(2) or _exit(2) (as with
+    -- vfork(2)).
+  , cloneVM :: Bool
+    -- ^ CLONE_VM (since Linux 2.0)
+    -- If CLONE_VM is set, the calling process and the child process
+    -- run in the same memory space.
+  } deriving (Eq, Ord, Show)
+
+emptyGranularCloneFlags :: GranularCloneFlags
+emptyGranularCloneFlags = GranularCloneFlags
+  { cloneVM = True
+  , cloneChildClearTID = True
+  , cloneChildSetTID = True
+#ifdef CLONE_CLEAR_SIGHAND
+  , cloneClearSigHand = True
+#endif
+  , cloneDetached = True
+  , cloneFiles = True
+  , cloneFS = True
+  , cloneIO = True
+  , cloneNewCgroup = True
+  , cloneNewIPC = True
+  , cloneNewNet = True
+  , cloneNewNS = True
+  , cloneNewPID = True
+  , cloneNewUser = True
+  , cloneNewUTS = True
+  , cloneParent = True
+  , cloneParentSetTID = True
+#ifdef CLONE_PIDFD
+  , clonePIDFD = True
+#endif
+  , clonePtrace = True
+  , cloneSetTLS = True
+  , cloneSigHand = True
+  , cloneSysVSem = True
+  , cloneThread = True
+  , cloneUntraced = True
+  , cloneVFork = True
+  }
+{-
+instance ArgFormatting AccessProtection where
+  formatArg = FixedStringArg . formatMode
+    where
+      formatMode (AccessProtectionKnown flags) =
+        let granularFlags = concat
+              [ if accessProtectionRead flags then ["PROT_READ"] else []
+              , if accessProtectionWrite flags then ["PROT_WRITE"] else []
+              , if accessProtectionExec flags then ["PROT_EXEC"] else []
+              , if accessProtectionGrowsUp flags then ["PROT_GROWSUP"] else []
+              , if accessProtectionGrowsDown flags then ["PROT_GROWSDOWN"] else []
+              ]
+        in if null granularFlags then "PROT_NONE" else intercalate "|" granularFlags
+      formatMode (AccessProtectionUnknown x) = show x
+-}
+
+deriveCIntRepresentable  ''CloneFlags [ ('cloneVM, (#const CLONE_VM))
+                                      , ('cloneChildClearTID, (#const CLONE_CHILD_CLEARTID))
+                                      , ('cloneChildSetTID, (#const CLONE_CHILD_SETTID))
+#ifdef CLONE_CLEAR_SIGHAND
+                                      , ('cloneClearSigHand, (#const CLONE_CLEAR_SIGHAND))
+#endif
+                                      , ('cloneDetached, (#const CLONE_DETACHED))
+                                      , ('cloneFiles, (#const CLONE_FILES))
+                                      , ('cloneFS, (#const CLONE_FS))
+                                      , ('cloneIO, (#const CLONE_IO))
+                                      , ('cloneNewCgroup, (#const CLONE_NEWCGROUP))
+                                      , ('cloneNewIPC, (#const CLONE_NEWIPC))
+                                      , ('cloneNewNet, (#const CLONE_NEWNET))
+                                      , ('cloneNewNS, (#const CLONE_NEWNS))
+                                      , ('cloneNewPID, (#const CLONE_NEWPID))
+                                      , ('cloneNewUser, (#const CLONE_NEWUSER))
+                                      , ('cloneNewUTS, (#const CLONE_NEWUTS))
+                                      , ('cloneParent, (#const CLONE_PARENT))
+                                      , ('cloneParentSetTID, (#const CLONE_PARENT_SETTID))
+#ifdef CLONE_PIDFD
+                                      , ('clonePIDFD, (#const CLONE_PIDFD))
+#endif
+                                      , ('clonePtrace, (#const CLONE_PTRACE))
+                                      , ('cloneSetTLS, (#const CLONE_SETTLS))
+                                      , ('cloneSigHand, (#const CLONE_SIGHAND))
+                                      , ('cloneSysVSem, (#const CLONE_SYSVSEM))
+                                      , ('cloneThread, (#const CLONE_THREAD))
+                                      , ('cloneUntraced, (#const CLONE_UNTRACED))
+                                      , ('cloneVFork, (#const CLONE_VFORK))
+                                      ] 
+--
+--instance CIntRepresentable CloneFlags where
+--  toCInt (CloneFlagsKnown gf) =
+--      childSetTID
+--    where
+----      r = if accessProtectionRead gf then (#const PROT_READ) else 0
+----      w = if accessProtectionWrite gf then (#const PROT_WRITE) else 0
+----      x = if accessProtectionExec gf then (#const PROT_EXEC) else 0
+----      up = if accessProtectionGrowsUp gf then (#const PROT_GROWSUP) else 0
+--      childSetTID = if cloneChildSetTID gf then (#const CLONE_CHILD_SETTID) else 0
+--  toCInt (CloneFlagsUnknown x) = x
+--  fromCInt m | (m .&. complement cloneBits) /= zeroBits = CloneFlagsUnknown m
+--             | otherwise =
+--                let isset f = (m .&. f) /= zeroBits
+--                in CloneFlagsKnown GranularCloneFlags
+--                   { cloneChildSetTID = isset (#const CLONE_CHILD_SETTID)
+-- #ifdef CLONE_CLEAR_SIGHAND
+--                   , cloneClearSigHand = isset (#const CLONE_CLEAR_SIGHAND)
+-- #endif
+--                   , cloneDetached = isset (#const CLONE_DETACHED)
+--                   , cloneFiles = isset (#const CLONE_FILES)
+--                   , cloneFS = isset (#const CLONE_FS)
+--                   , cloneIO = isset (#const CLONE_IO)
+--                   , cloneNewCgroup = isset (#const CLONE_NEWCGROUP)
+--                   , cloneNewIPC = isset (#const CLONE_NEWIPC)
+--                   , cloneNewNet = isset (#const CLONE_NEWNET)
+--                   , cloneNewNS = isset (#const CLONE_NEWNS)
+--                   , cloneNewPID = isset (#const CLONE_NEWPID)
+--                   , cloneNewUser = isset (#const CLONE_NEWUSER)
+--                   , cloneNewUTS = isset (#const CLONE_NEWUTS)
+--                   , cloneParent = isset (#const CLONE_PARENT)
+--                   , cloneParentSetTID = isset (#const CLONE_PARENT_SETTID)
+-- #ifdef CLONE_PIDFD
+--                   , clonePIDFD = isset (#const CLONE_PIDFD)
+-- #endif
+--                   , clonePtrace = isset (#const CLONE_PTRACE)
+--                   , cloneSetTLS = isset (#const CLONE_SETTLS)
+--                   , cloneSigHand = isset (#const CLONE_SIGHAND)
+--                   , cloneSysVSem = isset (#const CLONE_SYSVSEM)
+--                   , cloneThread = isset (#const CLONE_THREAD)
+--                   , cloneUntraced = isset (#const CLONE_UNTRACED)
+--                   , cloneVFork = isset (#const CLONE_VFORK)
+--                   , cloneVM = isset (#const CLONE_VM)
+--                   }
+--    where
+--      cloneBits =
+--        (#const CLONE_CHILD_SETTID)
