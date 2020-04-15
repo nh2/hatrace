@@ -288,7 +288,7 @@ spec = before_ assertNoChildren $ do
                   majorText:minorText:_
                     | Just (major :: Int) <- readMaybe (T.unpack majorText)
                     , Just (minor :: Int) <- readMaybe (T.unpack minorText)
-                      -> (major, minor) <= (8,6)
+                      -> (major, minor) <= (8,8)
                   _ -> error $ "Could not parse ghc version: " ++ ghcVersionOuput
 
 
