@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 -- To use `POLLRDHUP` with glibc, `_GNU_SOURCE` must be defined
 -- before any header file imports; see `man 2 poll`.
@@ -14,6 +15,7 @@
 #include <sys/sysinfo.h>
 #include <asm/prctl.h>
 #include <poll.h>
+#include <sched.h>
 #include <signal.h>
 
 module System.Hatrace.Types
@@ -45,6 +47,12 @@ module System.Hatrace.Types
   , GranularSendFlags(..)
   , ReceiveFlags(..)
   , GranularReceiveFlags(..)
+  , CloneFlags(..)
+  , GranularCloneFlags(..)
+  , emptyGranularCloneFlags
+  , fromCloneFlagsArg
+  , toCloneFlagsArg
+  , formatCloneFlagsArg
   ) where
 
 import           Control.Monad (filterM)
@@ -61,6 +69,7 @@ import           Foreign.Storable (Storable(..))
 import qualified System.Posix.Signals as Signals hiding (inSignalSet)
 import           System.Hatrace.Signals
 import           System.Hatrace.Types.Internal
+import           System.Hatrace.Types.TH
 import           System.Hatrace.Format
 
 
@@ -1257,3 +1266,266 @@ instance ArgFormatting SigSet where
       signalToStringArg =
         fmap (FixedStringArg . snd) . flip Data.Map.lookup signalMap
 
+data CloneFlags
+  = CloneFlagsKnown GranularCloneFlags
+  | CloneFlagsUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data GranularCloneFlags = GranularCloneFlags
+  { cloneChildClearTID :: Bool
+    -- ^ CLONE_CHILD_CLEARTID (since Linux 2.5.49)
+    -- Clear (zero) the child thread ID at the location pointed to by
+    -- child_tid (clone()) or cl_args.child_tid (clone3()) in child
+    -- memory when the child exits, and do a wakeup on the futex at
+    -- that address.
+  , cloneChildSetTID :: Bool
+    -- ^ CLONE_CHILD_SETTID (since Linux 2.5.49)
+    -- Store the child thread ID at the location pointed to by
+    -- child_tid (clone()) or cl_args.child_tid (clone3()) in the
+    -- child's memory.
+#ifdef CLONE_CLEAR_SIGHAND
+  , cloneClearSigHand :: Bool
+    -- ^ CLONE_CLEAR_SIGHAND (since Linux 5.5)
+    -- By default, signal dispositions in the child thread are the
+    -- same as in the parent.  If this flag is specified, then all
+    -- signals that are handled in the parent are reset to their
+    -- default dispositions (SIG_DFL) in the child.
+    -- 
+    -- Specifying this flag together with CLONE_SIGHAND is nonsensi‐
+    -- cal and disallowed.
+#endif
+  , cloneDetached :: Bool
+    -- ^ CLONE_DETACHED (historical)
+    -- This flag is still defined, but it is usually ignored when
+    -- calling clone().  However, see the description of CLONE_PIDFD
+    -- for some exceptions.
+  , cloneFiles :: Bool
+    -- ^ CLONE_FILES (since Linux 2.0)
+    -- If CLONE_FILES is set, the calling process and the child
+    -- process share the same file descriptor table.
+    -- If CLONE_FILES is not set, the child process inherits a copy
+    -- of all file descriptors opened in the calling process at the
+    -- time of the clone call.
+  , cloneFS :: Bool
+    -- ^ CLONE_FS (since Linux 2.0)
+    -- If CLONE_FS is set, the caller and the child process share the
+    -- same filesystem information.  This includes the root of the
+    -- filesystem, the current working directory, and the umask.
+    -- If CLONE_FS is not set, the child process works on a copy of
+    -- the filesystem information of the calling process at the time
+    -- of the clone call.
+  , cloneIO :: Bool
+    -- ^ CLONE_IO (since Linux 2.6.25)
+    -- If CLONE_IO is set, then the new process shares an I/O context
+    -- with the calling process.  If this flag is not set, then (as
+    -- with fork(2)) the new process has its own I/O context.
+  , cloneNewCgroup :: Bool
+    -- ^ CLONE_NEWCGROUP (since Linux 4.6)
+    -- Create the process in a new cgroup namespace.
+  , cloneNewIPC :: Bool
+    -- ^ CLONE_NEWIPC (since Linux 2.6.19)
+    -- If CLONE_NEWIPC is set, then create the process in a new IPC namespace.
+  , cloneNewNet :: Bool
+    -- ^ CLONE_NEWNET (since Linux 2.6.24)
+    -- If CLONE_NEWNET is set, then create the process in a new network namespace.
+  , cloneNewNS :: Bool
+    -- ^ CLONE_NEWNS (since Linux 2.4.19)
+    -- If CLONE_NEWNS is set, the cloned child is started in a new
+    -- mount namespace, initialized with a copy of the namespace of
+    -- the parent.
+  , cloneNewPID :: Bool
+    -- ^ CLONE_NEWPID (since Linux 2.6.24)
+    -- If CLONE_NEWPID is set, then create the process in a new PID namespace.
+  , cloneNewUser :: Bool
+    -- ^ CLONE_NEWUSER
+    -- If CLONE_NEWUSER is set, then create the process in a new user namespace.
+  , cloneNewUTS :: Bool
+    -- ^ CLONE_NEWUTS (since Linux 2.6.19)
+    -- If CLONE_NEWUTS is set, then create the process in a new UTS namespace,
+    -- whose identifiers are initialized by duplicating the identifiers from
+    -- the UTS namespace of the calling process.
+  , cloneParent :: Bool
+    -- ^ CLONE_PARENT (since Linux 2.3.12)
+    -- If CLONE_PARENT is set, then the parent of the new child (as
+    -- returned by getppid(2)) will be the same as that of the call‐
+    -- ing process.
+  , cloneParentSetTID :: Bool
+    -- ^ CLONE_PARENT_SETTID (since Linux 2.5.49)
+    -- Store the child thread ID at the location pointed to by parent_tid
+    -- (clone()) or cl_args.child_tid (clone3()) in the parent's memory.
+#ifdef CLONE_PIDFD
+  , clonePIDFD :: Bool
+    -- ^ CLONE_PIDFD (since Linux 5.2)
+    -- If this flag is specified, a PID file descriptor referring to
+    -- the child process is allocated and placed at a specified loca‐
+    -- tion in the parent's memory.
+#endif
+  , clonePtrace :: Bool
+    -- ^ CLONE_PTRACE (since Linux 2.2)
+    -- If CLONE_PTRACE is specified, and the calling process is being
+    -- traced, then trace the child also (see ptrace(2)).
+  , cloneSetTLS :: Bool
+    -- ^ CLONE_SETTLS (since Linux 2.5.32)
+    -- The TLS (Thread Local Storage) descriptor is set to tls.
+  , cloneSigHand :: Bool
+    -- ^ CLONE_SIGHAND (since Linux 2.0)
+    -- If CLONE_SIGHAND is set, the calling process and the child
+    -- process share the same table of signal handlers.
+  , cloneSysVSem :: Bool
+    -- ^ CLONE_SYSVSEM (since Linux 2.5.10)
+    -- If CLONE_SYSVSEM is set, then the child and the calling
+    -- process share a single list of System V semaphore adjustment
+    -- (semadj) values (see semop(2)).
+  , cloneThread :: Bool
+    -- ^ CLONE_THREAD (since Linux 2.4.0)
+    -- If CLONE_THREAD is set, the child is placed in the same thread
+    -- group as the calling process.
+  , cloneUntraced :: Bool
+    -- ^ CLONE_UNTRACED (since Linux 2.5.46)
+    -- If CLONE_UNTRACED is specified, then a tracing process cannot
+    -- force CLONE_PTRACE on this child process.
+  , cloneVFork :: Bool
+    -- ^ CLONE_VFORK (since Linux 2.2)
+    -- If CLONE_VFORK is set, the execution of the calling process is
+    -- suspended until the child releases its virtual memory
+    -- resources via a call to execve(2) or _exit(2) (as with
+    -- vfork(2)).
+  , cloneVM :: Bool
+    -- ^ CLONE_VM (since Linux 2.0)
+    -- If CLONE_VM is set, the calling process and the child process
+    -- run in the same memory space.
+  } deriving (Eq, Ord, Show)
+
+emptyGranularCloneFlags :: GranularCloneFlags
+emptyGranularCloneFlags = GranularCloneFlags
+  { cloneVM = True
+  , cloneChildClearTID = True
+  , cloneChildSetTID = True
+#ifdef CLONE_CLEAR_SIGHAND
+  , cloneClearSigHand = True
+#endif
+  , cloneDetached = True
+  , cloneFiles = True
+  , cloneFS = True
+  , cloneIO = True
+  , cloneNewCgroup = True
+  , cloneNewIPC = True
+  , cloneNewNet = True
+  , cloneNewNS = True
+  , cloneNewPID = True
+  , cloneNewUser = True
+  , cloneNewUTS = True
+  , cloneParent = True
+  , cloneParentSetTID = True
+#ifdef CLONE_PIDFD
+  , clonePIDFD = True
+#endif
+  , clonePtrace = True
+  , cloneSetTLS = True
+  , cloneSigHand = True
+  , cloneSysVSem = True
+  , cloneThread = True
+  , cloneUntraced = True
+  , cloneVFork = True
+  }
+
+-- The instance of CIntRepresentable for CloneFlags is partial
+-- because the @flags@ of the @clone@ syscall combines a termination signal
+-- in the lower byte of CInt value and uses upper bytes to pass clone flag bits.
+-- Please use fromCloneFlags and toCloneFlags as a workaround for this.
+-- The same applies for the instance of ArgFormatting and formatCloneFlagsArg
+-- is a workaround in that case.
+-- NOTE: at the moment we can't add this as a haddock as TH doesn't allow to
+-- add haddocks in a good way, there is a chance that this could change
+-- when the following ticket will get resolved:
+-- https://gitlab.haskell.org/ghc/ghc/issues/5467
+$(deriveFlagsTypeClasses ''CloneFlags ""
+   [ ('cloneVM, (#const CLONE_VM), "CLONE_VM")
+   , ('cloneChildClearTID, (#const CLONE_CHILD_CLEARTID), "CLONE_CHILD_CLEARTID")
+   , ('cloneChildSetTID, (#const CLONE_CHILD_SETTID), "CLONE_CHILD_SETTID")
+#ifdef CLONE_CLEAR_SIGHAND
+   , ('cloneClearSigHand, (#const CLONE_CLEAR_SIGHAND), "CLONE_CLEAR_SIGHAND")
+#endif
+   , ('cloneDetached, (#const CLONE_DETACHED), "CLONE_DETACHED")
+   , ('cloneFiles, (#const CLONE_FILES), "CLONE_FILES")
+   , ('cloneFS, (#const CLONE_FS), "CLONE_FS")
+   , ('cloneIO, (#const CLONE_IO), "CLONE_IO")
+   , ('cloneNewCgroup, (#const CLONE_NEWCGROUP), "CLONE_NEWCGROUP")
+   , ('cloneNewIPC, (#const CLONE_NEWIPC), "CLONE_NEWIPC")
+   , ('cloneNewNet, (#const CLONE_NEWNET), "CLONE_NEWNET")
+   , ('cloneNewNS, (#const CLONE_NEWNS), "CLONE_NEWNS")
+   , ('cloneNewPID, (#const CLONE_NEWPID), "CLONE_NEWPID")
+   , ('cloneNewUser, (#const CLONE_NEWUSER), "CLONE_NEWUSER")
+   , ('cloneNewUTS, (#const CLONE_NEWUTS), "CLONE_NEWUTS")
+   , ('cloneParent, (#const CLONE_PARENT), "CLONE_PARENT")
+   , ('cloneParentSetTID, (#const CLONE_PARENT_SETTID), "CLONE_PARENT_SETTID")
+#ifdef CLONE_PIDFD
+   , ('clonePIDFD, (#const CLONE_PIDFD), "CLONE_PIDFD")
+#endif
+   , ('clonePtrace, (#const CLONE_PTRACE), "CLONE_PTRACE")
+   , ('cloneSetTLS, (#const CLONE_SETTLS), "CLONE_SETTLS")
+   , ('cloneSigHand, (#const CLONE_SIGHAND), "CLONE_SIGHAND")
+   , ('cloneSysVSem, (#const CLONE_SYSVSEM), "CLONE_SYSVSEM")
+   , ('cloneThread, (#const CLONE_THREAD), "CLONE_THREAD")
+   , ('cloneUntraced, (#const CLONE_UNTRACED), "CLONE_UNTRACED")
+   , ('cloneVFork, (#const CLONE_VFORK), "CLONE_VFORK")
+   ])
+
+-- | converts value of the @clone@ syscall into a part of a termination signal
+-- and clone flags themselves
+fromCloneFlagsArg :: CInt -> (Signals.Signal, CloneFlags)
+fromCloneFlagsArg arg =
+  (arg .&. (#const CSIGNAL), fromCInt (arg .&. complement (#const CSIGNAL)))
+
+-- | converts a termination signal and clone flags into a value to be passed as
+-- the @flags@ argument of the @clone@ syscall
+toCloneFlagsArg :: Signals.Signal -> CloneFlags -> CInt
+toCloneFlagsArg termSignal cloneFlags =
+  termSignal .|. toCInt cloneFlags
+
+-- | combines termination signal and clone flags into one formatted syscall argument
+formatCloneFlagsArg :: Signals.Signal -> CloneFlags -> FormattedArg
+formatCloneFlagsArg termSignal cloneFlags =
+  FixedStringArg $
+  if null strCloneFlags then strTermSignal else strCloneFlags <> "|"  <> strTermSignal
+  where
+    -- formatArg for CloneFlags is constructed using deriveFlagsTypeClasses which currently
+    -- uses FixedStringArg to format flags
+    FixedStringArg strCloneFlags = formatArg cloneFlags
+    -- TODO: probably we need our own newtype for Signals
+    -- values taken from arch/alpha/include/uapi/asm/signal.h in Linux sources
+    strTermSignal = case termSignal of
+      (#const SIGHUP) -> "SIGHUP"
+      (#const SIGINT) -> "SIGINT"
+      (#const SIGQUIT) -> "SIGQUIT"
+      (#const SIGILL) -> "SIGILL"
+      (#const SIGTRAP) -> "SIGTRAP"
+      (#const SIGABRT) -> "SIGABRT"
+-- same value as SIGABRT
+--      (#const SIGIOT) -> "SIGIOT"
+      (#const SIGBUS) -> "SIGBUS"
+      (#const SIGFPE) -> "SIGFPE"
+      (#const SIGKILL) -> "SIGKILL"
+      (#const SIGSEGV) -> "SIGSEGV"
+      (#const SIGSYS) -> "SIGSYS"
+      (#const SIGPIPE) -> "SIGPIPE"
+      (#const SIGALRM) -> "SIGALRM"
+      (#const SIGTERM) -> "SIGTERM"
+      (#const SIGURG) -> "SIGURG"
+      (#const SIGSTOP) -> "SIGSTOP"
+      (#const SIGTSTP) -> "SIGTSTP"
+      (#const SIGCONT) -> "SIGCONT"
+      (#const SIGCHLD) -> "SIGCHLD"
+      (#const SIGTTIN) -> "SIGTTIN"
+      (#const SIGTTOU) -> "SIGTTOU"
+-- same value as SIGPOLL
+--      (#const SIGIO) -> "SIGIO"
+      (#const SIGXCPU) -> "SIGXCPU"
+      (#const SIGXFSZ) -> "SIGXFSZ"
+      (#const SIGVTALRM) -> "SIGVTALRM"
+      (#const SIGPROF) -> "SIGPROF"
+      (#const SIGWINCH) -> "SIGWINCH"
+      (#const SIGPOLL) -> "SIGPOLL"
+      (#const SIGUSR1) -> "SIGUSR1"
+      (#const SIGUSR2) -> "SIGUSR2"
+      unknown -> show unknown

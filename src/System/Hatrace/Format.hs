@@ -81,12 +81,12 @@ instance ArgFormatting CSize where
 instance ArgFormatting CMode where
   formatArg = IntegerArg . fromIntegral
 
+instance ArgFormatting CPid where
+  formatArg = IntegerArg . fromIntegral
+
 instance ArgFormatting CTime where
   formatArg = FixedStringArg . show .
               posixSecondsToUTCTime . realToFrac
-
-instance ArgFormatting CPid where
-  formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting (Ptr Void) where
   formatArg = formatPtrArg "void"

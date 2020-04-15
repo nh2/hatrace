@@ -32,7 +32,7 @@ import           System.Exit
 import           System.IO.Temp (emptySystemTempFile)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
-import           System.Posix.Signals (sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
+import           System.Posix.Signals (sigCHLD, sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
 import           System.Process (callProcess, readProcess)
 import           Test.Hspec
 import           Test.Hspec.QuickCheck
@@ -1041,3 +1041,21 @@ spec = before_ assertNoChildren $ do
               , sig == sigUSR1
               ]
         length kills `shouldBe` 1
+
+    describe "clone" $ do
+      it "seen clone from a shell command group" $ do
+        argv <- procToArgv "sh" ["-c", "(echo 42 > /dev/null)"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let clones =
+              [ termSignal
+              | (_pid
+                , Right (DetailedSyscallExit_clone
+                         SyscallExitDetails_clone
+                         { enterDetail = SyscallEnterDetails_clone { termSignal } })
+                ) <- events
+              , termSignal == sigCHLD
+              ]
+        length clones `shouldBe` 1
