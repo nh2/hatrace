@@ -116,6 +116,8 @@ module System.Hatrace
   , SyscallExitDetails_sched_yield(..)
   , SyscallEnterDetails_kill(..)
   , SyscallExitDetails_kill(..)
+  , SyscallEnterDetails_clone(..)
+  , SyscallExitDetails_clone(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1560,6 +1562,34 @@ instance SyscallExitFormatting SyscallExitDetails_sched_yield where
   syscallExitToFormatted SyscallExitDetails_sched_yield =
     (syscallEnterToFormatted SyscallEnterDetails_sched_yield, NoReturn)
 
+-- | We're using the order of arguments of glibc wrapper like strace does
+data SyscallEnterDetails_clone = SyscallEnterDetails_clone
+  { child_stack :: Ptr Void
+  , flags :: CULong
+  , ptid :: Ptr CInt
+  , newtls :: CULong
+  , ctid :: Ptr CInt
+  -- Peeked details
+  , termSignal :: Signal
+  , cloneFlags :: CloneFlags
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_clone where
+  syscallEnterToFormatted SyscallEnterDetails_clone{ child_stack, ptid, newtls, ctid, termSignal, cloneFlags } =
+    FormattedSyscall "clone" [ formatArg child_stack, formatCloneFlagsArg termSignal cloneFlags
+                             , formatPtrArg "int" ptid, formatArg newtls, formatPtrArg "int" ctid]
+
+
+data SyscallExitDetails_clone = SyscallExitDetails_clone
+  { enterDetail :: SyscallEnterDetails_clone
+  -- Peeked details
+  , childPid :: CPid
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_clone where
+  syscallExitToFormatted SyscallExitDetails_clone{ enterDetail, childPid } =
+    (syscallEnterToFormatted enterDetail, formatReturn childPid)
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -1608,6 +1638,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_pkey_mprotect SyscallEnterDetails_pkey_mprotect
   | DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   | DetailedSyscallEnter_kill SyscallEnterDetails_kill
+  | DetailedSyscallEnter_clone SyscallEnterDetails_clone
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1659,6 +1690,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_pkey_mprotect SyscallExitDetails_pkey_mprotect
   | DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
   | DetailedSyscallExit_kill SyscallExitDetails_kill
+  | DetailedSyscallExit_clone SyscallExitDetails_clone
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2160,6 +2192,23 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { pid = fromIntegral cpid
       , sig = fromIntegral signal
       }
+  Syscall_clone -> do
+    -- order of arguments for x86-64, x86-32 has ctid and newtls swapped
+    let SyscallArgs{ arg0 = flags, arg1 = child_stack
+                   , arg2 = ptid, arg3 = ctid, arg4 = newtls } = syscallArgs
+    let child_stackAddr = word64ToPtr child_stack
+    let ptidAddr = word64ToPtr ptid
+    let ctidAddr = word64ToPtr ctid
+    let (termSignal, cloneFlags) = fromCloneFlagsArg (fromIntegral flags)
+    pure $ DetailedSyscallEnter_clone $ SyscallEnterDetails_clone
+      { flags = fromIntegral flags
+      , child_stack = child_stackAddr
+      , ptid = ptidAddr
+      , ctid = ctidAddr
+      , newtls = fromIntegral newtls
+      , termSignal = termSignal
+      , cloneFlags = cloneFlags
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2447,6 +2496,14 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_kill{ } -> do
         pure $ DetailedSyscallExit_kill $
           SyscallExitDetails_kill{ enterDetail }
+
+    DetailedSyscallEnter_clone
+      enterDetail@SyscallEnterDetails_clone{ } -> do
+        pure $ DetailedSyscallExit_clone $
+          SyscallExitDetails_clone
+            { enterDetail
+            , childPid = fromIntegral result
+            }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -2932,6 +2989,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_kill details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_clone details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3062,6 +3121,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_sched_yield details -> formatDetails details
 
     DetailedSyscallExit_kill details -> formatDetails details
+
+    DetailedSyscallExit_clone details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
