@@ -1,5 +1,5 @@
 # When changing the resolver, also update shell.nix accordingly!
-resolver: lts-13.6
+resolver: lts-15.5
 packages:
 - .
 extra-deps:
