@@ -4,6 +4,7 @@
 
 module System.Hatrace.Types.TH
   ( deriveCIntRepresentable
+  , deriveArgFormatting
   ) where
 
 import Data.List (isSuffixOf,  partition)
@@ -12,6 +13,7 @@ import Language.Haskell.TH
 import Language.Haskell.TH.Datatype
 import Language.Haskell.TH.Syntax
 import System.Hatrace.Types.Internal
+import System.Hatrace.Format
 
 -- | derives an instance of CIntRepresentable for a datatype
 -- which is supposed to have a shape like
@@ -87,6 +89,75 @@ deriveCIntRepresentable typeName fieldFlags = do
                        ]
       methods = [toCIntImpl, fromCIntImpl]
   (:[]) <$> instanceD (cxt []) (appT (conT ''CIntRepresentable) (conT typeName)) methods
+
+-- | derives an instance of ArgFormatting for a datatype
+-- which is supposed to have a shape like
+--
+-- @
+-- data X = XKnown GranularX | XUnknown CInt
+-- @
+--
+-- with a type GranularX like
+--
+-- @
+-- data GranularX = GranularX
+--   { flagA :: Bool
+--   , flagB :: Bool
+--   }
+-- @
+--
+-- for such a type one could use
+--
+-- @
+-- \$(deriveArgFormatting ''X "FLAG_NONE"
+--   [ ('flagA, "FLAG_A")
+--   , ('flagB, "FLAG_B")
+--   ]
+-- @
+--
+-- to produce a definition like
+--
+-- @
+-- instance ArgFormatting X where
+--   formatArg =  FixedStringArg . formatFlags
+--     where
+--       formatFlags (XKnown flags) =
+--         let granularFlags = concat
+--               [ if flagA flags then ["FLAG_A"] else []
+--               , if flagB flags then ["FLAG_B"] else []
+--               ]
+--         in if null granularFlags then "FLAG_NONE" else intercalate "|" granularFlags
+--       formatFlags (XUnknown x) = show x
+-- @
+deriveArgFormatting :: Name -> String -> [(Name, String)] -> Q [Dec]
+deriveArgFormatting typeName def fieldFlags = do
+  dt <- reifyDatatype typeName
+  FlagTypes
+    { known,
+      unknown
+    } <-
+    splitConstructors (datatypeCons dt)
+  x <- newName "x"
+  let
+    formatArgImpl :: DecQ
+    formatArgImpl =
+      valD
+        (varP 'formatArg)
+        (normalB [| FixedStringArg . $formatFlags |])
+        []
+    concatE :: [ExpQ] -> ExpQ
+    concatE xs = [| concat $(listE xs) |]
+    granularFlags :: ExpQ
+    granularFlags = concatE [ [| if $(appE (varE field) (varE x)) then [str] else [] |]
+                            | (field, str) <- fieldFlags ]
+    formatFlags =
+      [| \f ->
+          case f of
+            $(conP known [varP x]) ->
+              if null $granularFlags then def else intercalate "|" $granularFlags
+            $(conP unknown [varP x]) -> show $(varE x)
+       |]
+  (: []) <$> instanceD (cxt []) (appT (conT ''ArgFormatting) (conT typeName)) [formatArgImpl]
 
 data FlagTypes = FlagTypes
   { known :: Name
