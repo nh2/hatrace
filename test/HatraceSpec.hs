@@ -35,6 +35,7 @@ import           System.Posix.Resource (Resource(..), ResourceLimit(..), Resourc
 import           System.Posix.Signals (sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
 import           System.Process (callProcess, readProcess)
 import           Test.Hspec
+import           Test.Hspec.QuickCheck
 import           Text.Read (readMaybe)
 import           UnliftIO.Exception (bracket)
 
@@ -437,6 +438,16 @@ spec = before_ assertNoChildren $ do
       let origSigset = List.sort [sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL]
       (SigSet pokedSigset) <- alloca $ \ptr -> do { poke ptr (SigSet origSigset); peek ptr }
       pokedSigset `shouldContain` origSigset
+
+  describe "deriveCIntRepresentable" $ do
+
+    prop "derived toCInt . fromCInt == id for FileAccessMode" $
+      \x -> toCInt (fromCInt x :: FileAccessMode) == x
+
+    prop "derived fromCInt . toCInt == id for FileAccessKnown" $
+      \(r, w, e) ->
+        let access = FileAccessKnown (GranularAccessMode r w e)
+        in fromCInt (toCInt access) == access
 
   describe "per-syscall tests" $ do
 
