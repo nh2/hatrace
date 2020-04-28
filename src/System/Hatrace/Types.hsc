@@ -62,12 +62,9 @@ import           Foreign.ForeignPtr (withForeignPtr, newForeignPtr_)
 import           Foreign.Storable (Storable(..))
 import qualified System.Posix.Signals as Signals hiding (inSignalSet)
 import           System.Hatrace.Signals
+import           System.Hatrace.Types.Internal
 import           System.Hatrace.Format
 
--- | Helper type class for int-sized enum-like types
-class CIntRepresentable a where
-  toCInt :: a -> CInt
-  fromCInt :: CInt -> a
 
 class CShortRepresentable a where
   toCShort :: a -> CShort
@@ -103,24 +100,12 @@ data GranularAccessMode = GranularAccessMode
 fileExistence :: GranularAccessMode
 fileExistence = GranularAccessMode False False False
 
-instance CIntRepresentable FileAccessMode where
-  toCInt (FileAccessKnown ga) = r .|. w .|. x .|. (#const F_OK)
-    where
-      r = if accessModeRead ga then (#const R_OK) else 0
-      w = if accessModeWrite ga then (#const W_OK) else 0
-      x = if accessModeExecute ga then (#const X_OK) else 0
-  toCInt (FileAccessUnknown x) = x
-  fromCInt (#const F_OK) = FileAccessKnown fileExistence
-  fromCInt m | (m .&. complement accessBits) /= zeroBits = FileAccessUnknown m
-             | otherwise =
-                let isset f = (m .&. f) /= zeroBits
-                in FileAccessKnown GranularAccessMode
-                   { accessModeRead = isset (#const R_OK)
-                   , accessModeWrite = isset (#const W_OK)
-                   , accessModeExecute = isset (#const X_OK)
-                   }
-    where
-      accessBits = (#const R_OK) .|. (#const W_OK) .|. (#const X_OK)
+-- | We assume F_OK being equal to 0 (which it normally is)
+$(deriveCIntRepresentable ''FileAccessMode
+  [ ('accessModeRead, (#const R_OK))
+  , ('accessModeWrite, (#const W_OK))
+  , ('accessModeExecute, (#const X_OK))
+  ])
 
 data MemoryProtectMode
   = MemoryProtectKnown GranularMemoryProtectMode
@@ -1408,5 +1393,3 @@ instance ArgFormatting MemAdvice where
     MadvPageOut -> "MADV_PAGEOUT"
 #endif
 
-hasSetBits :: CInt -> CInt -> Bool
-hasSetBits value mask = (value .&. mask) == mask
