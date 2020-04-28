@@ -1202,19 +1202,13 @@ data GranularAccessProtection = GranularAccessProtection
 noAccess :: GranularAccessProtection
 noAccess = GranularAccessProtection False False False False False
 
-instance ArgFormatting AccessProtection where
-  formatArg = FixedStringArg . formatMode
-    where
-      formatMode (AccessProtectionKnown flags) =
-        let granularFlags = concat
-              [ if accessProtectionRead flags then ["PROT_READ"] else []
-              , if accessProtectionWrite flags then ["PROT_WRITE"] else []
-              , if accessProtectionExec flags then ["PROT_EXEC"] else []
-              , if accessProtectionGrowsUp flags then ["PROT_GROWSUP"] else []
-              , if accessProtectionGrowsDown flags then ["PROT_GROWSDOWN"] else []
-              ]
-        in if null granularFlags then "PROT_NONE" else intercalate "|" granularFlags
-      formatMode (AccessProtectionUnknown x) = show x
+$(deriveArgFormatting ''AccessProtection "PROT_NONE"
+  [ ('accessProtectionRead, "PROT_READ")
+  , ('accessProtectionWrite, "PROT_WRITE")
+  , ('accessProtectionExec, "PROT_EXEC")
+  , ('accessProtectionGrowsUp, "PROT_GROWSUP")
+  , ('accessProtectionGrowsDown, "PROT_GROWSDOWN")
+  ])
 
 instance CIntRepresentable AccessProtection where
   toCInt (AccessProtectionKnown ga) =
