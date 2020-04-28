@@ -35,6 +35,8 @@ library
                        System.Hatrace.SyscallTables.Generated
                        System.Hatrace.SyscallTables.Util
                        System.Hatrace.Types
+                       System.Hatrace.Types.Internal
+                       System.Hatrace.Types.TH
   build-depends:       aeson
                      , base >= 4.7 && < 5
                      , bytestring
@@ -48,10 +50,14 @@ library
                      , process
                      , template-haskell
                      , text
+                     , th-abstraction
                      , time
                      , unix
                      , unliftio
                      , unliftio-core
+  -- we can't add required constraint >= 0.68.6 here because hsc2hs
+  -- shipped with GHC 8.8.* reports incorrect version
+  build-tools:         hsc2hs
   if os(linux)
     -- On Linux with glibc, POLLRDHUP support must be enabled
     -- manually; see `man 2 poll`. We control this with this macro.
