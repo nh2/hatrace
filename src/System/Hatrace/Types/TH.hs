@@ -5,6 +5,7 @@
 module System.Hatrace.Types.TH
   ( deriveCIntRepresentable
   , deriveArgFormatting
+  , deriveFlagsTypeClasses
   ) where
 
 import Data.List (isSuffixOf,  partition)
@@ -61,11 +62,12 @@ import System.Hatrace.Format
 deriveCIntRepresentable :: Name -> [(Name, Int)] -> Q [Dec]
 deriveCIntRepresentable typeName fieldFlags = do
   dt <- reifyDatatype typeName
-  FlagTypes
-   { known
-   , unknown
-   , granular
-   } <- splitConstructors (datatypeCons dt)
+  flagTypes <- splitConstructors typeName (datatypeCons dt)
+  (:[]) <$> deriveCIntRepresentable' flagTypes fieldFlags
+
+deriveCIntRepresentable' :: FlagTypes -> [(Name, Int)] -> Q Dec
+deriveCIntRepresentable' flagTypes fieldFlags = do
+  let FlagTypes{typeName, known, unknown, granular} = flagTypes
   x <- newName "x"
   let oredFields = foldr1 orE $ map fieldValE fieldFlags
       fieldValE :: (Name, Int) -> ExpQ
@@ -88,7 +90,7 @@ deriveCIntRepresentable typeName fieldFlags = do
         funD 'fromCInt [ clause [varP x] (normalB fromCIntBody) []
                        ]
       methods = [toCIntImpl, fromCIntImpl]
-  (:[]) <$> instanceD (cxt []) (appT (conT ''CIntRepresentable) (conT typeName)) methods
+  instanceD (cxt []) (appT (conT ''CIntRepresentable) (conT typeName)) methods
 
 -- | derives an instance of ArgFormatting for a datatype
 -- which is supposed to have a shape like
@@ -132,11 +134,12 @@ deriveCIntRepresentable typeName fieldFlags = do
 deriveArgFormatting :: Name -> String -> [(Name, String)] -> Q [Dec]
 deriveArgFormatting typeName def fieldFlags = do
   dt <- reifyDatatype typeName
-  FlagTypes
-    { known,
-      unknown
-    } <-
-    splitConstructors (datatypeCons dt)
+  flagTypes <- splitConstructors typeName (datatypeCons dt)
+  (:[]) <$> deriveArgFormatting' flagTypes def fieldFlags
+
+deriveArgFormatting' :: FlagTypes -> String -> [(Name, String)] -> Q Dec
+deriveArgFormatting' flagTypes def fieldFlags = do
+  let FlagTypes{typeName, known, unknown } = flagTypes
   x <- newName "x"
   let
     formatArgImpl :: DecQ
@@ -157,22 +160,36 @@ deriveArgFormatting typeName def fieldFlags = do
               if null $granularFlags then def else intercalate "|" $granularFlags
             $(conP unknown [varP x]) -> show $(varE x)
        |]
-  (: []) <$> instanceD (cxt []) (appT (conT ''ArgFormatting) (conT typeName)) [formatArgImpl]
+  instanceD (cxt []) (appT (conT ''ArgFormatting) (conT typeName)) [formatArgImpl]
+
+-- | a combination of deriveCIntRepresentable and deriveArgFormatting:
+-- generates 2 type classes using call
+deriveFlagsTypeClasses :: Name -> String -> [(Name, Int, String)] -> Q [Dec]
+deriveFlagsTypeClasses typeName def fieldFlags = do
+  dt <- reifyDatatype typeName
+  flagTypes <- splitConstructors typeName (datatypeCons dt)
+  let flagValues = [ (field, v) | (field, v, _) <- fieldFlags ]
+  cIntRepresentable <- deriveCIntRepresentable' flagTypes flagValues
+  let flagNames = [ (field, n) | (field, _, n) <- fieldFlags ]
+  argFormatting <- deriveArgFormatting' flagTypes def flagNames
+  pure [cIntRepresentable, argFormatting]
 
 data FlagTypes = FlagTypes
-  { known :: Name
+  { typeName :: Name
+  , known :: Name
   , unknown :: Name
   , granular :: Name
   }
 
-splitConstructors :: [ConstructorInfo] -> Q FlagTypes
-splitConstructors cs = do
+splitConstructors :: Name -> [ConstructorInfo] -> Q FlagTypes
+splitConstructors typeName cs = do
   cint <- datatypeType <$> reifyDatatype ''CInt
   case partition isKnown cs of
     ([k], [u]) | isUnknown cint u, [ConT granularType] <- constructorFields k -> do
                    [g] <- datatypeCons <$> reifyDatatype granularType
                    pure FlagTypes
-                     { known = constructorName k
+                     { typeName = typeName
+                     , known = constructorName k
                      , unknown = constructorName u
                      , granular = constructorName g
                      }
