@@ -973,6 +973,25 @@ spec = before_ assertNoChildren $ do
               ]
         length sysinfoDetails `shouldBe` 1
 
+    describe "madvise" $ do
+      it "seen madvise used by example executable" $ do
+        let progName = "example-programs-build/madvise"
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let memAdvices =
+              [ memAdvice
+              | (_pid
+                , Right (DetailedSyscallExit_madvise
+                         SyscallExitDetails_madvise
+                         { enterDetail = SyscallEnterDetails_madvise { memAdvice } })
+                ) <- events
+              ]
+        memAdvices `shouldBe` [ MemAdviceKnown MadvRandom ]
+
     describe "mprotect" $ do
       it "seen mprotect used by example executable" $ do
         let progName = "example-programs-build/mprotect"

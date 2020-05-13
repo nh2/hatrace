@@ -88,6 +88,8 @@ module System.Hatrace
   , SyscallExitDetails_mmap(..)
   , SyscallEnterDetails_munmap(..)
   , SyscallExitDetails_munmap(..)
+  , SyscallEnterDetails_madvise(..)
+  , SyscallExitDetails_madvise(..)
   , SyscallEnterDetails_symlink(..)
   , SyscallExitDetails_symlink(..)
   , SyscallEnterDetails_symlinkat(..)
@@ -1268,6 +1270,29 @@ instance SyscallExitFormatting SyscallExitDetails_munmap where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
+data SyscallEnterDetails_madvise = SyscallEnterDetails_madvise
+  { addr :: Ptr Void
+  , length_ :: CSize
+  , advice :: CInt
+  -- Peeked details
+  , memAdvice :: MemAdvice
+  } deriving (Eq, Ord, Show)
+
+
+instance SyscallEnterFormatting SyscallEnterDetails_madvise where
+  syscallEnterToFormatted SyscallEnterDetails_madvise{ addr, length_, memAdvice } =
+    FormattedSyscall "madvise" [ formatArg addr, formatArg length_, formatArg memAdvice ]
+
+
+data SyscallExitDetails_madvise = SyscallExitDetails_madvise
+  { enterDetail :: SyscallEnterDetails_madvise
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_madvise where
+  syscallExitToFormatted SyscallExitDetails_madvise{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 data SyscallEnterDetails_socket = SyscallEnterDetails_socket
   { domain :: CInt
   , type_ :: CInt
@@ -1569,6 +1594,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_socketpair SyscallEnterDetails_socketpair
   | DetailedSyscallEnter_mmap SyscallEnterDetails_mmap
   | DetailedSyscallEnter_munmap SyscallEnterDetails_munmap
+  | DetailedSyscallEnter_madvise SyscallEnterDetails_madvise
   | DetailedSyscallEnter_symlink SyscallEnterDetails_symlink
   | DetailedSyscallEnter_symlinkat SyscallEnterDetails_symlinkat
   | DetailedSyscallEnter_time SyscallEnterDetails_time
@@ -1619,6 +1645,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_socketpair SyscallExitDetails_socketpair
   | DetailedSyscallExit_mmap SyscallExitDetails_mmap
   | DetailedSyscallExit_munmap SyscallExitDetails_munmap
+  | DetailedSyscallExit_madvise SyscallExitDetails_madvise
   | DetailedSyscallExit_symlink SyscallExitDetails_symlink
   | DetailedSyscallExit_symlinkat SyscallExitDetails_symlinkat
   | DetailedSyscallExit_time SyscallExitDetails_time
@@ -1997,6 +2024,15 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { addr = addrPtr
       , len = fromIntegral len
       }
+  Syscall_madvise -> do
+    let SyscallArgs{ arg0 = addrAddr, arg1 = length_, arg2 = advice } = syscallArgs
+    let addrPtr = word64ToPtr addrAddr
+    pure $ DetailedSyscallEnter_madvise $ SyscallEnterDetails_madvise
+      { addr = addrPtr
+      , length_ = fromIntegral length_
+      , advice = fromIntegral advice
+      , memAdvice = fromCInt (fromIntegral advice)
+      }
   Syscall_symlink -> do
     let SyscallArgs{ arg0 = targetAddr, arg1 = linkpathAddr } = syscallArgs
     let targetPtr = word64ToPtr targetAddr
@@ -2320,6 +2356,11 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_munmap{} -> do
         pure $ DetailedSyscallExit_munmap $
             SyscallExitDetails_munmap{ enterDetail }
+
+    DetailedSyscallEnter_madvise
+      enterDetail@SyscallEnterDetails_madvise{} -> do
+        pure $ DetailedSyscallExit_madvise $
+            SyscallExitDetails_madvise{ enterDetail }
 
     DetailedSyscallEnter_symlink
       enterDetail@SyscallEnterDetails_symlink{} -> do
@@ -2837,6 +2878,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_munmap details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_madvise details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_symlink details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_symlinkat details -> syscallEnterToFormatted details
@@ -2965,6 +3008,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_mmap details -> formatDetails details
 
     DetailedSyscallExit_munmap details -> formatDetails details
+
+    DetailedSyscallExit_madvise details -> formatDetails details
 
     DetailedSyscallExit_symlink details -> formatDetails details
 

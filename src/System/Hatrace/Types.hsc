@@ -45,6 +45,8 @@ module System.Hatrace.Types
   , GranularSendFlags(..)
   , ReceiveFlags(..)
   , GranularReceiveFlags(..)
+  , MemAdvice(..)
+  , MadvBehavior(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -1277,6 +1279,133 @@ instance ArgFormatting SigSet where
     where
       signalToStringArg =
         fmap (FixedStringArg . snd) . flip Data.Map.lookup signalMap
+
+data MemAdvice = MemAdviceKnown MadvBehavior
+  | MemAdviceUnknown CInt
+  deriving (Eq, Ord, Show)
+
+-- | from @include/uapi/asm-generic/mman-common.h@ in kernel sources
+data MadvBehavior
+  = MadvNormal
+  | MadvRandom
+  | MadvSequential
+  | MadvWillNeed
+  | MadvDontNeed
+  | MadvFree
+  | MadvRemove
+  | MadvDontFork
+  | MadvDoFork
+  | MadvHWPoison
+#ifdef MADV_SOFT_OFFLINE
+  | MadvSoftOffline
+#endif
+  | MadvMergeable
+  | MadvUnmergeable
+  | MadvHugePage
+  | MadvNoHugePage
+  | MadvDontDump
+  | MadvDoDump
+  | MadvWipeOnFork
+  | MadvKeepOnFork
+#ifdef MADV_COLD
+  | MadvCold
+#endif
+#ifdef MADV_PAGEOUT
+  | MadvPageOut
+#endif
+  deriving (Eq, Ord, Show)
+
+instance CIntRepresentable MemAdvice where
+  toCInt (MemAdviceKnown known) =
+    case known of
+      MadvNormal -> (#const MADV_NORMAL)
+      MadvRandom -> (#const MADV_RANDOM)
+      MadvSequential -> (#const MADV_SEQUENTIAL)
+      MadvWillNeed -> (#const MADV_WILLNEED)
+      MadvDontNeed -> (#const MADV_DONTNEED)
+      MadvFree -> (#const MADV_FREE)
+      MadvRemove -> (#const MADV_REMOVE)
+      MadvDontFork -> (#const MADV_DONTFORK)
+      MadvDoFork -> (#const MADV_DOFORK)
+      MadvHWPoison -> (#const MADV_HWPOISON)
+#ifdef MADV_SOFT_OFFLINE
+      MadvSoftOffline -> (#const MADV_SOFT_OFFLINE)
+#endif
+      MadvMergeable -> (#const MADV_MERGEABLE)
+      MadvUnmergeable -> (#const MADV_UNMERGEABLE)
+      MadvHugePage -> (#const MADV_HUGEPAGE)
+      MadvNoHugePage -> (#const MADV_NOHUGEPAGE)
+      MadvDontDump -> (#const MADV_DONTDUMP)
+      MadvDoDump -> (#const MADV_DODUMP)
+      MadvWipeOnFork -> (#const MADV_WIPEONFORK)
+      MadvKeepOnFork -> (#const MADV_KEEPONFORK)
+#ifdef MADV_COLD
+      MadvCold -> (#const MADV_COLD)
+#endif
+#ifdef MADV_PAGEOUT
+      MadvPageOut -> (#const MADV_PAGEOUT)
+#endif
+  toCInt (MemAdviceUnknown unknown) = unknown
+  fromCInt advice = case advice  of
+    (#const MADV_NORMAL) -> MemAdviceKnown MadvNormal
+    (#const MADV_RANDOM) -> MemAdviceKnown MadvRandom
+    (#const MADV_SEQUENTIAL) -> MemAdviceKnown MadvSequential
+    (#const MADV_WILLNEED) -> MemAdviceKnown MadvWillNeed
+    (#const MADV_DONTNEED) -> MemAdviceKnown MadvDontNeed
+    (#const MADV_FREE) -> MemAdviceKnown MadvFree
+    (#const MADV_REMOVE) -> MemAdviceKnown MadvRemove
+    (#const MADV_DONTFORK) -> MemAdviceKnown MadvDontFork
+    (#const MADV_DOFORK) -> MemAdviceKnown MadvDoFork
+    (#const MADV_HWPOISON) -> MemAdviceKnown MadvHWPoison
+#ifdef MADV_SOFT_OFFLINE
+    (#const MADV_SOFT_OFFLINE) -> MemAdviceKnown MadvSoftOffline
+#endif
+    (#const MADV_MERGEABLE) -> MemAdviceKnown MadvMergeable
+    (#const MADV_UNMERGEABLE) -> MemAdviceKnown MadvUnmergeable
+    (#const MADV_HUGEPAGE) -> MemAdviceKnown MadvHugePage
+    (#const MADV_NOHUGEPAGE) -> MemAdviceKnown MadvNoHugePage
+    (#const MADV_DONTDUMP) -> MemAdviceKnown MadvDontDump
+    (#const MADV_DODUMP) -> MemAdviceKnown MadvDoDump
+    (#const MADV_WIPEONFORK) -> MemAdviceKnown MadvWipeOnFork
+    (#const MADV_KEEPONFORK) -> MemAdviceKnown MadvKeepOnFork
+#ifdef MADV_COLD
+    (#const MADV_COLD) -> MemAdviceKnown MadvCold
+#endif
+#ifdef MADV_PAGEOUT
+    (#const MADV_PAGEOUT) -> MemAdviceKnown MadvPageOut
+#endif
+    unknown -> MemAdviceUnknown unknown
+
+instance ArgFormatting MemAdvice where
+  formatArg (MemAdviceUnknown unknown) = IntegerArg (fromIntegral unknown)
+  formatArg (MemAdviceKnown t) = FixedStringArg $ case t of
+    MadvNormal -> "MADV_NORMAL"
+    MadvRandom -> "MADV_RANDOM"
+    MadvSequential -> "MADV_SEQUENTIAL"
+    MadvWillNeed -> "MADV_WILLNEED"
+    MadvDontNeed -> "MADV_DONTNEED"
+    MadvFree -> "MADV_FREE"
+    MadvRemove -> "MADV_REMOVE"
+    MadvDontFork -> "MADV_DONTFORK"
+    MadvDoFork -> "MADV_DOFORK"
+    MadvHWPoison -> "MADV_HWPOISON"
+#ifdef MADV_SOFT_OFFLINE
+    MadvSoftOffline -> "MADV_SOFT_OFFLINE"
+#endif
+    MadvMergeable -> "MADV_MERGEABLE"
+    MadvUnmergeable -> "MADV_UNMERGEABLE"
+    MadvHugePage -> "MADV_HUGEPAGE"
+    MadvNoHugePage -> "MADV_NOHUGEPAGE"
+    MadvDontDump -> "MADV_DONTDUMP"
+    MadvDoDump -> "MADV_DODUMP"
+    MadvWipeOnFork -> "MADV_WIPEONFORK"
+    MadvKeepOnFork -> "MADV_KEEPONFORK"
+#ifdef MADV_COLD
+    MadvCold -> "MADV_COLD"
+#endif
+#ifdef MADV_PAGEOUT
+    MadvPageOut -> "MADV_PAGEOUT"
+#endif
 
 hasSetBits :: CInt -> CInt -> Bool
 hasSetBits value mask = (value .&. mask) == mask
