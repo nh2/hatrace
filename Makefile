@@ -29,6 +29,7 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mprotect
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/unlink
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sched_yield
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/kill
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/madvise
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
