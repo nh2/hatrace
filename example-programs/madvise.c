@@ -1,3 +1,7 @@
+/*
+ * Example follows the one in mprotect.c
+ */
+
 #define _GNU_SOURCE
 
 #include <stdio.h>

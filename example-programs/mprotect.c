@@ -1,3 +1,7 @@
+/*
+ * Example is taken from mprotect(2)
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
