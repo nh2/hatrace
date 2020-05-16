@@ -1571,6 +1571,8 @@ data SyscallEnterDetails_clone = SyscallEnterDetails_clone
   , ctid :: Ptr CInt
   -- Peeked details
   , termSignal :: Signal
+  -- ^ The low byte of flags contains the number of the termination signal
+  -- sent to the parent when the child dies. See clone(2) for more details.
   , cloneFlags :: CloneFlags
   } deriving (Eq, Ord, Show)
 
