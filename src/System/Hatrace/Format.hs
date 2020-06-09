@@ -12,6 +12,7 @@ module System.Hatrace.Format
   , syscallToString
   , syscallExitToString
   , formatPtrArg
+  , formatNullableArg
   , argPlaceholder
   , formatReturn
   ) where
@@ -96,6 +97,10 @@ formatPtrArg type_ p
   | p == nullPtr = FixedStringArg "NULL"
   | otherwise =
     FixedStringArg $ "*" ++ type_ ++ "(" ++ show (toInteger $ ptrToIntPtr p) ++ ")"
+
+formatNullableArg :: ArgFormatting a => Maybe a -> FormattedArg
+formatNullableArg Nothing = FixedStringArg "NULL"
+formatNullableArg (Just a) = formatArg a
 
 instance ArgFormatting a => ArgFormatting [a] where
   formatArg = ListArg . map formatArg
