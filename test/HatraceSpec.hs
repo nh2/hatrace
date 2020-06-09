@@ -1078,3 +1078,21 @@ spec = before_ assertNoChildren $ do
               , termSignal == sigCHLD
               ]
         length clones `shouldBe` 1
+
+    describe "prlimit64" $ do
+      it "seen prlimit64 from a shell command ulimit" $ do
+        argv <- procToArgv "sh" ["-c", "ulimit -n > /dev/null"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let clones =
+              [ termSignal
+              | (_pid
+                , Right (DetailedSyscallExit_prlimit64
+                         SyscallExitDetails_prlimit64
+                         { enterDetail = SyscallEnterDetails_prlimit64 { rlimitType } })
+                ) <- events
+              , rlimitType == ResourceTypeKnown ResourceNoFile
+              ]
+        length clones `shouldBe` 1

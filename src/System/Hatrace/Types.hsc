@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/sysinfo.h>
@@ -55,6 +56,9 @@ module System.Hatrace.Types
   , fromCloneFlagsArg
   , toCloneFlagsArg
   , formatCloneFlagsArg
+  , RLimitType(..)
+  , ResourceType(..)
+  , RLimitStruct(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -1420,7 +1424,7 @@ data GranularCloneFlags = GranularCloneFlags
     -- same as in the parent.  If this flag is specified, then all
     -- signals that are handled in the parent are reset to their
     -- default dispositions (SIG_DFL) in the child.
-    -- 
+    --
     -- Specifying this flag together with CLONE_SIGHAND is nonsensi‐
     -- cal and disallowed.
 #endif
@@ -1659,3 +1663,71 @@ formatCloneFlagsArg termSignal cloneFlags =
       (#const SIGUSR1) -> "SIGUSR1"
       (#const SIGUSR2) -> "SIGUSR2"
       unknown -> show unknown
+
+data RLimitStruct = RLimitStruct
+  { rlim_cur :: CULong -- ^ Soft limit
+  , rlim_max :: CULong -- ^ Hard limit (ceiling for rlim_cur)
+  } deriving (Eq, Ord, Show)
+
+instance Storable RLimitStruct where
+  sizeOf _ = #{size struct rlimit}
+  alignment _ = #{alignment struct rlimit}
+  peek p = do
+    rlim_cur <- #{peek struct rlimit, rlim_cur} p
+    rlim_max <- #{peek struct rlimit, rlim_max} p
+    return RLimitStruct{..}
+  poke p RLimitStruct{..} = do
+    #{poke struct rlimit, rlim_cur} p rlim_cur
+    #{poke struct rlimit, rlim_max} p rlim_max
+
+-- outputtting st_mode and st_size first following strace
+-- which appears to output only those
+instance ArgFormatting RLimitStruct where
+  formatArg RLimitStruct {..} =
+    StructArg
+      [ ("rlim_cur", formatArg rlim_cur)
+      , ("rlim_max", formatArg rlim_max)
+      ]
+
+data RLimitType
+  = ResourceTypeKnown ResourceType
+  | ResourceTypeUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data ResourceType
+  = ResourceCPU -- ^ CPU time in sec
+  | ResourceFSize -- ^ Maximum filesize
+  | ResourceData -- ^ max data size
+  | ResourceStack -- ^ max stack size
+  | ResourceCore -- ^ max core file size
+  | ResourceRSS -- ^ max resident set size
+  | ResourceNProc -- ^ max number of processes
+  | ResourceNoFile -- ^ max number of open files
+  | ResourceMemLock -- ^ max locked-in-memory address space
+  | ResourceAS -- ^ address space limit
+  | ResourceLocks -- ^ maximum file locks held
+  | ResourceSigPending -- ^ max number of pending signals
+  | ResourceMsgQueue -- ^ maximum bytes in POSIX mqueues
+  | ResourceNice -- ^ max nice prio allowed to raise to 0-39 for nice level 19 .. -20
+  | ResourceRTPrio -- ^ maximum realtime priority
+  | ResourceRTTime -- ^ timeout for RT tasks in us
+  deriving (Eq, Ord, Show)
+
+$(deriveEnumTypeClasses ''RLimitType
+  [ ('ResourceCPU, (#const RLIMIT_CPU), "RLIMIT_CPU")
+  , ('ResourceFSize, (#const RLIMIT_FSIZE), "RLIMIT_FSIZE")
+  , ('ResourceData, (#const RLIMIT_DATA), "RLIMIT_DATA")
+  , ('ResourceStack, (#const RLIMIT_STACK), "RLIMIT_STACK")
+  , ('ResourceCore, (#const RLIMIT_CORE), "RLIMIT_CORE")
+  , ('ResourceRSS, (#const RLIMIT_RSS), "RLIMIT_RSS")
+  , ('ResourceNProc, (#const RLIMIT_NPROC), "RLIMIT_NPROC")
+  , ('ResourceNoFile, (#const RLIMIT_NOFILE), "RLIMIT_NOFILE")
+  , ('ResourceMemLock , (#const RLIMIT_MEMLOCK), "RLIMIT_MEMLOCK")
+  , ('ResourceAS, (#const RLIMIT_AS), "RLIMIT_AS")
+  , ('ResourceLocks, (#const RLIMIT_LOCKS), "RLIMIT_LOCKS")
+  , ('ResourceSigPending, (#const RLIMIT_SIGPENDING), "RLIMIT_SIGPENDING")
+  , ('ResourceMsgQueue, (#const RLIMIT_MSGQUEUE), "RLIMIT_MSGQUEUE")
+  , ('ResourceNice, (#const RLIMIT_NICE), "RLIMIT_NICE")
+  , ('ResourceRTPrio, (#const RLIMIT_RTPRIO), "RLIMIT_RTPRIO")
+  , ('ResourceRTTime, (#const RLIMIT_RTTIME), "RLIMIT_RTTIME")
+  ])

@@ -118,6 +118,8 @@ module System.Hatrace
   , SyscallExitDetails_kill(..)
   , SyscallEnterDetails_clone(..)
   , SyscallExitDetails_clone(..)
+  , SyscallEnterDetails_prlimit64(..)
+  , SyscallExitDetails_prlimit64(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1592,6 +1594,41 @@ instance SyscallExitFormatting SyscallExitDetails_clone where
   syscallExitToFormatted SyscallExitDetails_clone{ enterDetail, childPid } =
     (syscallEnterToFormatted enterDetail, formatReturn childPid)
 
+-- | We're using the order of arguments of glibc wrapper like strace does
+data SyscallEnterDetails_prlimit64 = SyscallEnterDetails_prlimit64
+  { pid :: CPid
+  , resource :: CInt
+  , new_limit :: Ptr RLimitStruct
+  , old_limit :: Ptr RLimitStruct
+  -- Peeked details
+  , rlimitType :: RLimitType
+  , newLimit :: Maybe RLimitStruct
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_prlimit64 where
+  syscallEnterToFormatted SyscallEnterDetails_prlimit64{ pid, rlimitType, newLimit, old_limit } =
+    formatPrlimit64 pid rlimitType newLimit (formatPtrArg "rlimit" old_limit)
+
+
+formatPrlimit64 :: CPid -> RLimitType -> Maybe RLimitStruct -> FormattedArg -> FormattedSyscall
+formatPrlimit64 pid rlimitType newLimit oldLimitArg =
+  FormattedSyscall "prlimit64" [ formatArg pid, formatArg rlimitType
+                               , formatNullableArg newLimit, oldLimitArg]
+
+
+data SyscallExitDetails_prlimit64 = SyscallExitDetails_prlimit64
+  { enterDetail :: SyscallEnterDetails_prlimit64
+  -- Peeked details
+  , oldLimit :: Maybe RLimitStruct
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_prlimit64 where
+  syscallExitToFormatted SyscallExitDetails_prlimit64{ enterDetail, oldLimit } =
+    ( formatPrlimit64 pid rlimitType newLimit (formatNullableArg oldLimit)
+    , NoReturn)
+    where
+      SyscallEnterDetails_prlimit64{ pid, rlimitType, newLimit } = enterDetail
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -1641,6 +1678,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   | DetailedSyscallEnter_kill SyscallEnterDetails_kill
   | DetailedSyscallEnter_clone SyscallEnterDetails_clone
+  | DetailedSyscallEnter_prlimit64 SyscallEnterDetails_prlimit64
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1693,6 +1731,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
   | DetailedSyscallExit_kill SyscallExitDetails_kill
   | DetailedSyscallExit_clone SyscallExitDetails_clone
+  | DetailedSyscallExit_prlimit64 SyscallExitDetails_prlimit64
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2211,6 +2250,24 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , termSignal = termSignal
       , cloneFlags = cloneFlags
       }
+  Syscall_prlimit64 -> do
+    -- order of arguments for x86-64, x86-32 has ctid and newtls swapped
+    let SyscallArgs{ arg0 = pid', arg1 = resource
+                   , arg2 = new_limit, arg3 = old_limit } = syscallArgs
+    let new_limitAddr = word64ToPtr new_limit
+    let old_limitAddr = word64ToPtr old_limit
+    -- what do we do with NULLS?
+    newLimit <- if new_limitAddr == nullPtr
+      then pure Nothing
+      else Just <$> Ptrace.peek (TracedProcess pid) new_limitAddr
+    pure $ DetailedSyscallEnter_prlimit64 $ SyscallEnterDetails_prlimit64
+      { pid = fromIntegral pid'
+      , resource = fromIntegral resource
+      , new_limit = new_limitAddr
+      , old_limit = old_limitAddr
+      , rlimitType = fromCInt (fromIntegral resource)
+      , newLimit
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2505,6 +2562,17 @@ getSyscallExitDetails detailedSyscallEnter result pid =
           SyscallExitDetails_clone
             { enterDetail
             , childPid = fromIntegral result
+            }
+
+    DetailedSyscallEnter_prlimit64
+      enterDetail@SyscallEnterDetails_prlimit64{ old_limit } -> do
+        oldLimit <- if old_limit == nullPtr
+          then pure Nothing
+          else Just <$> Ptrace.peek (TracedProcess pid) old_limit
+        pure $ DetailedSyscallExit_prlimit64 $
+          SyscallExitDetails_prlimit64
+            { enterDetail
+            , oldLimit = oldLimit
             }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
@@ -2993,6 +3061,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_clone details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_prlimit64 details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3125,6 +3195,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_kill details -> formatDetails details
 
     DetailedSyscallExit_clone details -> formatDetails details
+
+    DetailedSyscallExit_prlimit64 details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
