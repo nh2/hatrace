@@ -110,7 +110,7 @@ fileExistence :: GranularAccessMode
 fileExistence = GranularAccessMode False False False
 
 -- | We assume F_OK being equal to 0 (which it normally is)
-$(deriveCIntRepresentable ''FileAccessMode
+$(deriveFlagsCIntRepresentable ''FileAccessMode
   [ ('accessModeRead, (#const R_OK))
   , ('accessModeWrite, (#const W_OK))
   , ('accessModeExecute, (#const X_OK))
@@ -1211,7 +1211,7 @@ data GranularAccessProtection = GranularAccessProtection
 noAccess :: GranularAccessProtection
 noAccess = GranularAccessProtection False False False False False
 
-$(deriveArgFormatting ''AccessProtection "PROT_NONE"
+$(deriveFlagsArgFormatting ''AccessProtection "PROT_NONE"
   [ ('accessProtectionRead, "PROT_READ")
   , ('accessProtectionWrite, "PROT_WRITE")
   , ('accessProtectionExec, "PROT_EXEC")
