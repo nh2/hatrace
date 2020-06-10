@@ -45,13 +45,13 @@ If you find any of the below topics interesting give it a shot!
 It is recommended to file an issue when picking up one of the tasks to coordinate against doing duplicate work.
 
 * [ ] Implement all the syscalls
-* [ ] Remembering syscall arguments in a PID/TID map
+* [X] Remembering syscall arguments in a PID/TID map
 * [ ] Support for `sysenter`
-* [ ] reading tracee memory more efficiently (see [how strace does it](https://github.com/strace/strace/blob/d091f1a9e27756b3c399da1c500c915f473a56f3/ucopy.c#L45)
+* [ ] reading tracee memory more efficiently (see [how strace does it](https://github.com/strace/strace/blob/d091f1a9e27756b3c399da1c500c915f473a56f3/ucopy.c#L45))
 * [ ] Helpers for modifying memory
 * [ ] One real-world example each for the use cases on `Use cases` above
 * [ ] `hatrace` executable features:
-  * [ ] JSON output
+  * [X] JSON output
   * [ ] Coloured output
   * [ ] Timing `strace -ttt` and `-T`
   * [ ] special run modes tailored to specific tasks (e.g. execve tree)
