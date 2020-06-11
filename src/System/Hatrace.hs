@@ -24,6 +24,8 @@ module System.Hatrace
   , formatHatraceEventConduit
   , printHatraceEvent
   , printHatraceEventJson
+  , SyscallEnterDetails_getcwd(..)
+  , SyscallExitDetails_getcwd(..)
   , SyscallEnterDetails_open(..)
   , SyscallExitDetails_open(..)
   , SyscallEnterDetails_openat(..)
@@ -445,6 +447,30 @@ word64ToPtr w = wordPtrToPtr (fromIntegral w)
 --
 -- Users should also use @DuplicateRecordFields@ to avoid getting
 -- @Ambiguous occurrence@ errors.
+
+data SyscallEnterDetails_getcwd = SyscallEnterDetails_getcwd
+  { buf :: Ptr CChar
+  , size :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_getcwd where
+  syscallEnterToFormatted SyscallEnterDetails_getcwd{ size } =
+    FormattedSyscall "getcwd" [argPlaceholder "*buf", formatArg size]
+
+
+data SyscallExitDetails_getcwd = SyscallExitDetails_getcwd
+  { enterDetail :: SyscallEnterDetails_getcwd
+  , bufContents :: ByteString
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_getcwd where
+  syscallExitToFormatted SyscallExitDetails_getcwd{ enterDetail, bufContents } =
+    ( FormattedSyscall "getcwd" [formatArg bufContents, formatArg size]
+    , formatReturn bufContents
+    )
+    where
+      SyscallEnterDetails_getcwd{ size } = enterDetail
+
 
 data SyscallEnterDetails_open = SyscallEnterDetails_open
   { pathname :: Ptr CChar
@@ -1594,7 +1620,8 @@ instance SyscallExitFormatting SyscallExitDetails_clone where
 
 
 data DetailedSyscallEnter
-  = DetailedSyscallEnter_open SyscallEnterDetails_open
+  = DetailedSyscallEnter_getcwd SyscallEnterDetails_getcwd
+  | DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
   | DetailedSyscallEnter_creat SyscallEnterDetails_creat
   | DetailedSyscallEnter_pipe SyscallEnterDetails_pipe
@@ -1646,7 +1673,8 @@ data DetailedSyscallEnter
 
 
 data DetailedSyscallExit
-  = DetailedSyscallExit_open SyscallExitDetails_open
+  = DetailedSyscallExit_getcwd SyscallExitDetails_getcwd
+  | DetailedSyscallExit_open SyscallExitDetails_open
   | DetailedSyscallExit_openat SyscallExitDetails_openat
   | DetailedSyscallExit_creat SyscallExitDetails_creat
   | DetailedSyscallExit_pipe SyscallExitDetails_pipe
@@ -1727,6 +1755,12 @@ getEnterDetails pid = do
 
 getSyscallEnterDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO DetailedSyscallEnter
 getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in case syscall of
+  Syscall_getcwd -> do
+    let SyscallArgs{ arg0 = buf, arg1 = size } = syscallArgs
+    pure $ DetailedSyscallEnter_getcwd $ SyscallEnterDetails_getcwd
+      { buf = word64ToPtr buf
+      , size = fromIntegral size
+      }
   Syscall_open -> do
     let SyscallArgs{ arg0 = pathnameAddr, arg1 = flags, arg2 = mode } = syscallArgs
     let pathnamePtr = word64ToPtr pathnameAddr
@@ -2238,6 +2272,12 @@ getRawSyscallExitDetails knownSyscall syscallArgs pid = do
 getSyscallExitDetails :: DetailedSyscallEnter -> Word64 -> CPid -> IO DetailedSyscallExit
 getSyscallExitDetails detailedSyscallEnter result pid =
   case detailedSyscallEnter of
+
+    DetailedSyscallEnter_getcwd
+      enterDetail@SyscallEnterDetails_getcwd{ buf } -> do
+        bufContents <- peekNullTerminatedBytes (TracedProcess pid) buf
+        pure $ DetailedSyscallExit_getcwd $
+          SyscallExitDetails_getcwd{ enterDetail, bufContents }
 
     DetailedSyscallEnter_open
       enterDetail@SyscallEnterDetails_open{} -> do
@@ -2899,6 +2939,8 @@ formatSyscallEnter enterDetails =
       FormattedSyscall ("unknown_syscall_" ++ show number) (unimplementedArgs syscallArgs)
     KnownEnterDetails _knownSyscall detailed ->
       case detailed of
+        DetailedSyscallEnter_getcwd details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_open details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_openat details -> syscallEnterToFormatted details
@@ -3032,6 +3074,8 @@ formatDetailedSyscallExit ::
   -> IO (FormattedSyscall, ReturnOrErrno)
 formatDetailedSyscallExit detailedExit handleUnimplemented =
   case detailedExit of
+    DetailedSyscallExit_getcwd details -> formatDetails details
+
     DetailedSyscallExit_open details -> formatDetails details
 
     DetailedSyscallExit_openat details -> formatDetails details
