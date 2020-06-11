@@ -12,6 +12,7 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC (pack)
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
@@ -31,6 +32,7 @@ import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
 import           System.IO.Temp (withSystemTempDirectory, emptySystemTempFile)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
+import           System.Posix.Directory (getWorkingDirectory)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
 import           System.Posix.Signals (sigCHLD, sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
 import           System.Posix.User (getRealUserID, getRealGroupID, getEffectiveUserID, getEffectiveGroupID)
@@ -811,6 +813,25 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         timeDetails `shouldBe` [True, True]
+
+    describe "getcwd" $ do
+      it "correctly get the current directory" $ do
+        currentWorkingDirectory <- getWorkingDirectory
+        callProcess "make" ["--quiet", "example-programs-build/getcwd"]
+        argv <- procToArgv "example-programs-build/getcwd" []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let getcwdDetails =
+              [ bufContents
+              | (_pid
+                , Right (DetailedSyscallExit_getcwd
+                         SyscallExitDetails_getcwd
+                         { bufContents })
+                ) <- events
+              ]
+        getcwdDetails `shouldBe` [ BSC.pack currentWorkingDirectory ]
 
     describe "brk" $ do
       it "has correct output after changing program break" $ do
