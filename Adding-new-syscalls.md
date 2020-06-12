@@ -3,8 +3,8 @@
 Adding a new syscall definitions to `hatrace` is relatively simple and looks more or less the same for all of them. And yet different syscalls have different arguments and require different ways of handling them. The starting point could be just opening a man page in section 2 for a particular syscall - for example `man 2 unlink`. On that man page you should be able to find all the details you need and usually you'll get details not for just one syscall but also for some related syscalls as well. It makes sense to implement all of them as one PR.
 
 `hatrace` catches 2 events related to a syscall invocation:
-	* syscall enter
-	* syscall exit
+* syscall enter
+* syscall exit
 
 Those two events need different handling because a syscall could fill some data as its side effect so on enter that argument could be not yet initialized.
 
