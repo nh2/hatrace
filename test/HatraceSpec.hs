@@ -29,7 +29,7 @@ import           Foreign.Storable (sizeOf, peek, poke)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
 import           System.Exit
-import           System.IO.Temp (emptySystemTempFile)
+import           System.IO.Temp (createTempDirectory, emptySystemTempFile, getCanonicalTemporaryDirectory)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
 import           System.Posix.Signals (sigCHLD, sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
@@ -1196,4 +1196,44 @@ spec = before_ assertNoChildren $ do
                 ) <- events
               ]
         directories `shouldBe` [T.encodeUtf8 (T.pack tmpDirectory)]
+
+    describe "mkdir" $ do
+      it "occurs when we create a directory" $ do
+        tmpDirectory <- getCanonicalTemporaryDirectory
+        let directoryToMk = tmpDirectory <> "/mkdir-test"
+        let testProgram = "example-programs-build/mkdir"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [directoryToMk]
+        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv $
+          syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let directories =
+              [ pathnameBS
+              | (_pid
+                , Right (DetailedSyscallExit_mkdir
+                         SyscallExitDetails_mkdir
+                         { enterDetail = SyscallEnterDetails_mkdir { pathnameBS } })
+                ) <- events
+              ]
+        directories `shouldBe` [T.encodeUtf8 (T.pack directoryToMk)]
+
+    describe "rmdir" $ do
+      it "occurs when we delete a directory" $ do
+        tmpDirectory <- getCanonicalTemporaryDirectory
+        directoryToRm <- createTempDirectory tmpDirectory "rmdir-test"
+        let testProgram = "example-programs-build/rmdir"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [directoryToRm]
+        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv $
+          syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let directories =
+              [ pathnameBS
+              | (_pid
+                , Right (DetailedSyscallExit_rmdir
+                         SyscallExitDetails_rmdir
+                         { enterDetail = SyscallEnterDetails_rmdir { pathnameBS } })
+                ) <- events
+              ]
+        directories `shouldBe` [T.encodeUtf8 (T.pack directoryToRm)]
 
