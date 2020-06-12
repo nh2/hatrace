@@ -120,6 +120,10 @@ module System.Hatrace
   , SyscallExitDetails_clone(..)
   , SyscallEnterDetails_prlimit64(..)
   , SyscallExitDetails_prlimit64(..)
+  , SyscallEnterDetails_chdir(..)
+  , SyscallExitDetails_chdir(..)
+  , SyscallEnterDetails_fchdir(..)
+  , SyscallExitDetails_fchdir(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1630,6 +1634,44 @@ instance SyscallExitFormatting SyscallExitDetails_prlimit64 where
       SyscallEnterDetails_prlimit64{ pid, rlimitType, newLimit } = enterDetail
 
 
+data SyscallEnterDetails_chdir = SyscallEnterDetails_chdir
+  { path :: Ptr CChar
+  -- Peeked details
+  , pathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_chdir where
+  syscallEnterToFormatted SyscallEnterDetails_chdir{ pathBS } =
+    FormattedSyscall "chdir" [formatArg pathBS]
+
+
+data SyscallExitDetails_chdir = SyscallExitDetails_chdir
+  { enterDetail :: SyscallEnterDetails_chdir
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_chdir where
+  syscallExitToFormatted SyscallExitDetails_chdir{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
+data SyscallEnterDetails_fchdir = SyscallEnterDetails_fchdir
+  { fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_fchdir where
+  syscallEnterToFormatted SyscallEnterDetails_fchdir{ fd } =
+    FormattedSyscall "fchdir" [formatArg fd]
+
+
+data SyscallExitDetails_fchdir = SyscallExitDetails_fchdir
+  { enterDetail :: SyscallEnterDetails_fchdir
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_fchdir where
+  syscallExitToFormatted SyscallExitDetails_fchdir{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1679,6 +1721,8 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_kill SyscallEnterDetails_kill
   | DetailedSyscallEnter_clone SyscallEnterDetails_clone
   | DetailedSyscallEnter_prlimit64 SyscallEnterDetails_prlimit64
+  | DetailedSyscallEnter_chdir SyscallEnterDetails_chdir
+  | DetailedSyscallEnter_fchdir SyscallEnterDetails_fchdir
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1732,6 +1776,8 @@ data DetailedSyscallExit
   | DetailedSyscallExit_kill SyscallExitDetails_kill
   | DetailedSyscallExit_clone SyscallExitDetails_clone
   | DetailedSyscallExit_prlimit64 SyscallExitDetails_prlimit64
+  | DetailedSyscallExit_chdir SyscallExitDetails_chdir
+  | DetailedSyscallExit_fchdir SyscallExitDetails_fchdir
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2267,6 +2313,19 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , rlimitType = fromCInt (fromIntegral resource)
       , newLimit
       }
+  Syscall_chdir -> do
+    let SyscallArgs{ arg0 = path } = syscallArgs
+        pathPtr = word64ToPtr path
+    pathBS <- peekNullTerminatedBytes proc pathPtr
+    pure $ DetailedSyscallEnter_chdir $ SyscallEnterDetails_chdir
+      { path = pathPtr
+      , pathBS
+      }
+  Syscall_fchdir -> do
+    let SyscallArgs{ arg0 = fd } = syscallArgs
+    pure $ DetailedSyscallEnter_fchdir $ SyscallEnterDetails_fchdir
+      { fd = fromIntegral fd
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2573,6 +2632,16 @@ getSyscallExitDetails detailedSyscallEnter result pid =
             { enterDetail
             , oldLimit = oldLimit
             }
+
+    DetailedSyscallEnter_chdir
+      enterDetail@SyscallEnterDetails_chdir{} -> do
+        pure $ DetailedSyscallExit_chdir $
+          SyscallExitDetails_chdir { enterDetail }
+
+    DetailedSyscallEnter_fchdir
+      enterDetail@SyscallEnterDetails_fchdir{} -> do
+        pure $ DetailedSyscallExit_fchdir $
+          SyscallExitDetails_fchdir { enterDetail }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -3062,6 +3131,10 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_prlimit64 details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_chdir details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_fchdir details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3196,6 +3269,10 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_clone details -> formatDetails details
 
     DetailedSyscallExit_prlimit64 details -> formatDetails details
+
+    DetailedSyscallExit_chdir details -> formatDetails details
+
+    DetailedSyscallExit_fchdir details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
