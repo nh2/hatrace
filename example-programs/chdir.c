@@ -1,10 +1,16 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
+
+void die_usage(void)
+{
+  fputs("Usage: chdir /path/to/directory/to/chdir\n", stderr);
+  exit(1);
+}
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
-    puts("chdir /path/to/directory/to/chdir\n");
-    return 1;
+    die_usage();
   }
 
   const char* directory = argv[1];
