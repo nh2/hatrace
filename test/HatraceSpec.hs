@@ -33,6 +33,7 @@ import           System.IO.Temp (emptySystemTempFile)
 import           System.Posix.Files (getFileStatus, fileSize, readSymbolicLink)
 import           System.Posix.Resource (Resource(..), ResourceLimit(..), ResourceLimits(..), getResourceLimit, setResourceLimit)
 import           System.Posix.Signals (sigCHLD, sigTERM, sigUSR1, sigINT, sigSYS, sigQUIT, sigKILL)
+import           System.Posix.User (getRealUserID, getRealGroupID, getEffectiveUserID, getEffectiveGroupID)
 import           System.Process (callProcess, readProcess)
 import           Test.Hspec
 import           Test.Hspec.QuickCheck
@@ -1060,6 +1061,86 @@ spec = before_ assertNoChildren $ do
               , sig == sigUSR1
               ]
         length kills `shouldBe` 1
+
+    describe "getuid" $ do
+      it "should return the current user id" $ do
+        let progName = "example-programs-build/user-infos"
+        userId <- getRealUserID
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let getuid_details =
+              [ syscallUserId
+              | (_pid
+                , Right (DetailedSyscallExit_getuid
+                         SyscallExitDetails_getuid
+                         { userId = syscallUserId })
+                ) <- events
+              ]
+        getuid_details `shouldBe` [fromIntegral userId]
+
+    describe "getgid" $ do
+      it "should return the current group id" $ do
+        let progName = "example-programs-build/user-infos"
+        groupId <- getRealGroupID
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let getgid_details =
+              [ syscallGroupId
+              | (_pid
+                , Right (DetailedSyscallExit_getgid
+                         SyscallExitDetails_getgid
+                         { groupId = syscallGroupId })
+                ) <- events
+              ]
+        getgid_details `shouldBe` [fromIntegral groupId]
+
+    describe "geteuid" $ do
+      it "should return the current effective user id" $ do
+        let progName = "example-programs-build/user-infos"
+        userId <- getEffectiveUserID
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let geteuid_details =
+              [ syscallUserId
+              | (_pid
+                , Right (DetailedSyscallExit_geteuid
+                         SyscallExitDetails_geteuid
+                         { userId = syscallUserId })
+                ) <- events
+              ]
+        geteuid_details `shouldBe` [fromIntegral userId]
+
+    describe "getegid" $ do
+      it "should return the current effective group id" $ do
+        let progName = "example-programs-build/user-infos"
+        groupId <- getEffectiveGroupID
+        callProcess "make" ["--quiet", progName]
+        argv <- procToArgv progName []
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let getegid_details =
+              [ syscallGroupId
+              | (_pid
+                , Right (DetailedSyscallExit_getegid
+                         SyscallExitDetails_getegid
+                         { groupId = syscallGroupId })
+                ) <- events
+              ]
+        getegid_details `shouldBe` [fromIntegral groupId]
 
     describe "clone" $ do
       it "seen clone from a shell command group" $ do
