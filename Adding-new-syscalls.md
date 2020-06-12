@@ -26,8 +26,13 @@ Formatting of exit details is done using the type class `SyscallExitFormatting` 
 
 ## Dealing with syscall parameters
 
-Currently the most of primitive syscall arguments are just represented as `CInt`s but there is some support for more complex types, see some examples in the module `System.Hatrace.Types`.
-TODO: describe handling of complex structs as well as dealing with strings.
+Currently the most of primitive syscall arguments are just represented as `CInt`s but there is some support for more complex types. For the types represented as `CInt` there is a type class `CIntRepresentable` with conversion methods `fromCInt` and `toCInt`. And for output formatting there is a type class `ArgFormatting`. In most cases types stored in a `CInt` could be classified into 2 categories: 1) enumerations of some values; 2) flags which could be combined together. Implementing `CIntRepresentable` and `ArgFormatting` for such types is quite repetitive and a bit error-prone as some values could be hidden behind `#ifdef`s. Because of that `hatrace` has some Template Haskell helpers deriving needed instances automatically. See their haddocks in `System.Hatrace.Types.TH`.
+
+String values are represented in 2 forms:
+* `Ptr CChar` as a raw value mirroring `char*` in C
+* `ByteString` with a value peeked from the pointer above, this could be a field of either enter or exit details depending on whether it's specified by a user or if the kernel provides it
+
+For handling C structs see some examples in the module `System.Hatrace.Types`.
 
 ## Implementation checklist
 
