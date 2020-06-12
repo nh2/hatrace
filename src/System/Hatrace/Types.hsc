@@ -438,7 +438,7 @@ instance Storable StatStruct where
     #{poke struct stat, st_mtim} p st_mtim
     #{poke struct stat, st_ctim} p st_ctim
 
--- outputtting st_mode and st_size first following strace
+-- outputting st_mode and st_size first following strace
 -- which appears to output only those
 instance ArgFormatting StatStruct where
   formatArg StatStruct {..} =
