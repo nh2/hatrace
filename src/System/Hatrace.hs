@@ -1570,6 +1570,54 @@ instance SyscallExitFormatting SyscallExitDetails_getuid where
     ( syscallEnterToFormatted enterDetail, formatReturn userId )
 
 
+data SyscallEnterDetails_getgid = SyscallEnterDetails_getgid
+  deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_getgid where
+  syscallEnterToFormatted SyscallEnterDetails_getgid = FormattedSyscall "getgid" []
+
+data SyscallExitDetails_getgid = SyscallExitDetails_getgid
+  { enterDetail :: SyscallEnterDetails_getgid
+  , groupId :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_getgid where
+  syscallExitToFormatted SyscallExitDetails_getgid{ enterDetail, groupId } =
+    ( syscallEnterToFormatted enterDetail, formatReturn groupId )
+
+
+data SyscallEnterDetails_geteuid = SyscallEnterDetails_geteuid
+  deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_geteuid where
+  syscallEnterToFormatted SyscallEnterDetails_geteuid = FormattedSyscall "geteuid" []
+
+data SyscallExitDetails_geteuid = SyscallExitDetails_geteuid
+  { enterDetail :: SyscallEnterDetails_geteuid
+  , userId :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_geteuid where
+  syscallExitToFormatted SyscallExitDetails_geteuid{ enterDetail, userId } =
+    ( syscallEnterToFormatted enterDetail, formatReturn userId )
+
+
+data SyscallEnterDetails_getegid = SyscallEnterDetails_getegid
+  deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_getegid where
+  syscallEnterToFormatted SyscallEnterDetails_getegid = FormattedSyscall "getegid" []
+
+data SyscallExitDetails_getegid = SyscallExitDetails_getegid
+  { enterDetail :: SyscallEnterDetails_getegid
+  , groupId :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_getegid where
+  syscallExitToFormatted SyscallExitDetails_getegid{ enterDetail, groupId } =
+    ( syscallEnterToFormatted enterDetail, formatReturn groupId )
+
+
 data SyscallEnterDetails_sched_yield = SyscallEnterDetails_sched_yield
   deriving (Eq, Ord, Show)
 
@@ -1737,6 +1785,9 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   | DetailedSyscallEnter_kill SyscallEnterDetails_kill
   | DetailedSyscallEnter_getuid SyscallEnterDetails_getuid
+  | DetailedSyscallEnter_getgid SyscallEnterDetails_getgid
+  | DetailedSyscallEnter_geteuid SyscallEnterDetails_geteuid
+  | DetailedSyscallEnter_getegid SyscallEnterDetails_getegid
   | DetailedSyscallEnter_clone SyscallEnterDetails_clone
   | DetailedSyscallEnter_prlimit64 SyscallEnterDetails_prlimit64
   | DetailedSyscallEnter_chdir SyscallEnterDetails_chdir
@@ -1793,6 +1844,9 @@ data DetailedSyscallExit
   | DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
   | DetailedSyscallExit_kill SyscallExitDetails_kill
   | DetailedSyscallExit_getuid SyscallExitDetails_getuid
+  | DetailedSyscallExit_getgid SyscallExitDetails_getgid
+  | DetailedSyscallExit_geteuid SyscallExitDetails_geteuid
+  | DetailedSyscallExit_getegid SyscallExitDetails_getegid
   | DetailedSyscallExit_clone SyscallExitDetails_clone
   | DetailedSyscallExit_prlimit64 SyscallExitDetails_prlimit64
   | DetailedSyscallExit_chdir SyscallExitDetails_chdir
@@ -2300,6 +2354,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       }
   Syscall_getuid -> do
     pure $ DetailedSyscallEnter_getuid $ SyscallEnterDetails_getuid
+  Syscall_getgid -> do
+    pure $ DetailedSyscallEnter_getgid $ SyscallEnterDetails_getgid
+  Syscall_geteuid -> do
+    pure $ DetailedSyscallEnter_geteuid $ SyscallEnterDetails_geteuid
+  Syscall_getegid -> do
+    pure $ DetailedSyscallEnter_getegid $ SyscallEnterDetails_getegid
   Syscall_clone -> do
     -- order of arguments for x86-64, x86-32 has ctid and newtls swapped
     let SyscallArgs{ arg0 = flags, arg1 = child_stack
@@ -2639,6 +2699,21 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_getuid -> do
         pure $ DetailedSyscallExit_getuid $
           SyscallExitDetails_getuid{ enterDetail, userId = fromIntegral result }
+
+    DetailedSyscallEnter_getgid
+      enterDetail@SyscallEnterDetails_getgid -> do
+        pure $ DetailedSyscallExit_getgid $
+          SyscallExitDetails_getgid{ enterDetail, groupId = fromIntegral result }
+
+    DetailedSyscallEnter_geteuid
+      enterDetail@SyscallEnterDetails_geteuid -> do
+        pure $ DetailedSyscallExit_geteuid $
+          SyscallExitDetails_geteuid{ enterDetail, userId = fromIntegral result }
+
+    DetailedSyscallEnter_getegid
+      enterDetail@SyscallEnterDetails_getegid -> do
+        pure $ DetailedSyscallExit_getegid $
+          SyscallExitDetails_getegid{ enterDetail, groupId = fromIntegral result }
 
     DetailedSyscallEnter_clone
       enterDetail@SyscallEnterDetails_clone{ } -> do
@@ -3155,6 +3230,12 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_getuid details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_getgid details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_geteuid details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_getegid details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_clone details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_prlimit64 details -> syscallEnterToFormatted details
@@ -3295,6 +3376,12 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_kill details -> formatDetails details
 
     DetailedSyscallExit_getuid details -> formatDetails details
+
+    DetailedSyscallExit_getgid details -> formatDetails details
+
+    DetailedSyscallExit_geteuid details -> formatDetails details
+
+    DetailedSyscallExit_getegid details -> formatDetails details
 
     DetailedSyscallExit_clone details -> formatDetails details
 
