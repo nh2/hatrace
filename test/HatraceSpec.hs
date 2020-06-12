@@ -1096,3 +1096,23 @@ spec = before_ assertNoChildren $ do
               , rlimitType == ResourceTypeKnown ResourceNoFile
               ]
         length prlimits `shouldBe` 1
+
+    describe "chdir" $ do
+      it "occurs when we change the current directory" $ do
+        let testProgram = "example-programs-build/chdir"
+        callProcess "make" ["--quiet", testProgram]
+        let tmpDirectory = "/tmp"
+        argv <- procToArgv testProgram [tmpDirectory]
+        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv $
+          syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let directories =
+              [ pathBS
+              | (_pid
+                , Right (DetailedSyscallExit_chdir
+                         SyscallExitDetails_chdir
+                         { enterDetail = SyscallEnterDetails_chdir { pathBS } })
+                ) <- events
+              ]
+        directories `shouldBe` [T.encodeUtf8 (T.pack tmpDirectory)]
+
