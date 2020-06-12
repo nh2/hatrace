@@ -204,7 +204,7 @@ import           System.Linux.Ptrace.X86Regs (X86Regs(..))
 import           System.Posix.Files (readSymbolicLink)
 import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
-import           System.Posix.Types (CPid(..), CMode(..))
+import           System.Posix.Types (CPid(..), CMode(..), CUid(..), CGid(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..), Flag(..))
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
@@ -1570,7 +1570,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_getuid where
 
 data SyscallExitDetails_getuid = SyscallExitDetails_getuid
   { enterDetail :: SyscallEnterDetails_getuid
-  , userId :: CInt
+  , userId :: CUid
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_getuid where
@@ -1586,7 +1586,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_getgid where
 
 data SyscallExitDetails_getgid = SyscallExitDetails_getgid
   { enterDetail :: SyscallEnterDetails_getgid
-  , groupId :: CInt
+  , groupId :: CGid
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_getgid where
@@ -1602,7 +1602,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_geteuid where
 
 data SyscallExitDetails_geteuid = SyscallExitDetails_geteuid
   { enterDetail :: SyscallEnterDetails_geteuid
-  , userId :: CInt
+  , userId :: CUid
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_geteuid where
@@ -1618,7 +1618,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_getegid where
 
 data SyscallExitDetails_getegid = SyscallExitDetails_getegid
   { enterDetail :: SyscallEnterDetails_getegid
-  , groupId :: CInt
+  , groupId :: CGid
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_getegid where

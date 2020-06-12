@@ -28,7 +28,7 @@ import           Data.Void (Void)
 import           Data.Word (Word64)
 import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
 import           Foreign.Ptr (Ptr, nullPtr, ptrToIntPtr)
-import           System.Posix.Types (CMode(..), CPid(..))
+import           System.Posix.Types (CMode(..), CPid(..), CUid(..), CGid(..))
 
 class SyscallEnterFormatting a where
   syscallEnterToFormatted :: a -> FormattedSyscall
@@ -83,6 +83,12 @@ instance ArgFormatting CMode where
   formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CPid where
+  formatArg = IntegerArg . fromIntegral
+
+instance ArgFormatting CUid where
+  formatArg = IntegerArg . fromIntegral
+
+instance ArgFormatting CGid where
   formatArg = IntegerArg . fromIntegral
 
 instance ArgFormatting CTime where
