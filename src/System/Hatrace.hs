@@ -1547,6 +1547,23 @@ instance SyscallExitFormatting SyscallExitDetails_kill where
   syscallExitToFormatted SyscallExitDetails_kill{ enterDetail } =
     ( syscallEnterToFormatted enterDetail, NoReturn )
 
+
+data SyscallEnterDetails_getuid = SyscallEnterDetails_getuid
+  deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_getuid where
+  syscallEnterToFormatted SyscallEnterDetails_getuid = FormattedSyscall "getuid" []
+
+data SyscallExitDetails_getuid = SyscallExitDetails_getuid
+  { enterDetail :: SyscallEnterDetails_getuid
+  , userId :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_getuid where
+  syscallExitToFormatted SyscallExitDetails_getuid{ enterDetail, userId } =
+    ( syscallEnterToFormatted enterDetail, formatReturn userId )
+
+
 data SyscallEnterDetails_sched_yield = SyscallEnterDetails_sched_yield
   deriving (Eq, Ord, Show)
 
@@ -1640,6 +1657,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_pkey_mprotect SyscallEnterDetails_pkey_mprotect
   | DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   | DetailedSyscallEnter_kill SyscallEnterDetails_kill
+  | DetailedSyscallEnter_getuid SyscallEnterDetails_getuid
   | DetailedSyscallEnter_clone SyscallEnterDetails_clone
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
@@ -1692,6 +1710,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_pkey_mprotect SyscallExitDetails_pkey_mprotect
   | DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
   | DetailedSyscallExit_kill SyscallExitDetails_kill
+  | DetailedSyscallExit_getuid SyscallExitDetails_getuid
   | DetailedSyscallExit_clone SyscallExitDetails_clone
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
@@ -2194,6 +2213,8 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { pid = fromIntegral cpid
       , sig = fromIntegral signal
       }
+  Syscall_getuid -> do
+    pure $ DetailedSyscallEnter_getuid $ SyscallEnterDetails_getuid
   Syscall_clone -> do
     -- order of arguments for x86-64, x86-32 has ctid and newtls swapped
     let SyscallArgs{ arg0 = flags, arg1 = child_stack
@@ -2498,6 +2519,11 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_kill{ } -> do
         pure $ DetailedSyscallExit_kill $
           SyscallExitDetails_kill{ enterDetail }
+
+    DetailedSyscallEnter_getuid
+      enterDetail@SyscallEnterDetails_getuid -> do
+        pure $ DetailedSyscallExit_getuid $
+          SyscallExitDetails_getuid{ enterDetail, userId = fromIntegral result }
 
     DetailedSyscallEnter_clone
       enterDetail@SyscallEnterDetails_clone{ } -> do
@@ -2991,6 +3017,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_kill details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_getuid details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_clone details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
@@ -3123,6 +3151,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_sched_yield details -> formatDetails details
 
     DetailedSyscallExit_kill details -> formatDetails details
+
+    DetailedSyscallExit_getuid details -> formatDetails details
 
     DetailedSyscallExit_clone details -> formatDetails details
 
