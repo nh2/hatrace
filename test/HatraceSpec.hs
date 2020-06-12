@@ -1099,3 +1099,41 @@ spec = before_ assertNoChildren $ do
               , termSignal == sigCHLD
               ]
         length clones `shouldBe` 1
+
+    describe "prlimit64" $ do
+      it "seen prlimit64 from a shell command ulimit" $ do
+        argv <- procToArgv "sh" ["-c", "ulimit -n > /dev/null"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let prlimits =
+              [ termSignal
+              | (_pid
+                , Right (DetailedSyscallExit_prlimit64
+                         SyscallExitDetails_prlimit64
+                         { enterDetail = SyscallEnterDetails_prlimit64 { rlimitType } })
+                ) <- events
+              , rlimitType == ResourceTypeKnown ResourceNoFile
+              ]
+        length prlimits `shouldBe` 1
+
+    describe "chdir" $ do
+      it "occurs when we change the current directory" $ do
+        let testProgram = "example-programs-build/chdir"
+        callProcess "make" ["--quiet", testProgram]
+        let tmpDirectory = "/tmp"
+        argv <- procToArgv testProgram [tmpDirectory]
+        (exitCode, events) <- sourceTraceForkExecvFullPathWithSink argv $
+          syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let directories =
+              [ pathBS
+              | (_pid
+                , Right (DetailedSyscallExit_chdir
+                         SyscallExitDetails_chdir
+                         { enterDetail = SyscallEnterDetails_chdir { pathBS } })
+                ) <- events
+              ]
+        directories `shouldBe` [T.encodeUtf8 (T.pack tmpDirectory)]
+

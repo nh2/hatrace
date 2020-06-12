@@ -120,6 +120,12 @@ module System.Hatrace
   , SyscallExitDetails_kill(..)
   , SyscallEnterDetails_clone(..)
   , SyscallExitDetails_clone(..)
+  , SyscallEnterDetails_prlimit64(..)
+  , SyscallExitDetails_prlimit64(..)
+  , SyscallEnterDetails_chdir(..)
+  , SyscallExitDetails_chdir(..)
+  , SyscallEnterDetails_fchdir(..)
+  , SyscallExitDetails_fchdir(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1618,6 +1624,79 @@ instance SyscallExitFormatting SyscallExitDetails_clone where
   syscallExitToFormatted SyscallExitDetails_clone{ enterDetail, childPid } =
     (syscallEnterToFormatted enterDetail, formatReturn childPid)
 
+-- | We're using the order of arguments of glibc wrapper like strace does
+data SyscallEnterDetails_prlimit64 = SyscallEnterDetails_prlimit64
+  { pid :: CPid
+  , resource :: CInt
+  , new_limit :: Ptr RLimitStruct
+  , old_limit :: Ptr RLimitStruct
+  -- Peeked details
+  , rlimitType :: RLimitType
+  , newLimit :: Maybe RLimitStruct -- ^ Nothing means that new_limit was passed a NULL value, i.e. was not specified
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_prlimit64 where
+  syscallEnterToFormatted SyscallEnterDetails_prlimit64{ pid, rlimitType, newLimit, old_limit } =
+    formatPrlimit64 pid rlimitType newLimit (formatPtrArg "rlimit" old_limit)
+
+
+formatPrlimit64 :: CPid -> RLimitType -> Maybe RLimitStruct -> FormattedArg -> FormattedSyscall
+formatPrlimit64 pid rlimitType newLimit oldLimitArg =
+  FormattedSyscall "prlimit64" [ formatArg pid, formatArg rlimitType
+                               , formatNullableArg newLimit, oldLimitArg]
+
+
+data SyscallExitDetails_prlimit64 = SyscallExitDetails_prlimit64
+  { enterDetail :: SyscallEnterDetails_prlimit64
+  -- Peeked details
+  , oldLimit :: Maybe RLimitStruct -- ^ Nothing means that old_limit was passed a NULL value, i.e. was not requested
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_prlimit64 where
+  syscallExitToFormatted SyscallExitDetails_prlimit64{ enterDetail, oldLimit } =
+    ( formatPrlimit64 pid rlimitType newLimit (formatNullableArg oldLimit)
+    , NoReturn)
+    where
+      SyscallEnterDetails_prlimit64{ pid, rlimitType, newLimit } = enterDetail
+
+
+data SyscallEnterDetails_chdir = SyscallEnterDetails_chdir
+  { path :: Ptr CChar
+  -- Peeked details
+  , pathBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_chdir where
+  syscallEnterToFormatted SyscallEnterDetails_chdir{ pathBS } =
+    FormattedSyscall "chdir" [formatArg pathBS]
+
+
+data SyscallExitDetails_chdir = SyscallExitDetails_chdir
+  { enterDetail :: SyscallEnterDetails_chdir
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_chdir where
+  syscallExitToFormatted SyscallExitDetails_chdir{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
+data SyscallEnterDetails_fchdir = SyscallEnterDetails_fchdir
+  { fd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_fchdir where
+  syscallEnterToFormatted SyscallEnterDetails_fchdir{ fd } =
+    FormattedSyscall "fchdir" [formatArg fd]
+
+
+data SyscallExitDetails_fchdir = SyscallExitDetails_fchdir
+  { enterDetail :: SyscallEnterDetails_fchdir
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_fchdir where
+  syscallExitToFormatted SyscallExitDetails_fchdir{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_getcwd SyscallEnterDetails_getcwd
@@ -1668,6 +1747,9 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_sched_yield SyscallEnterDetails_sched_yield
   | DetailedSyscallEnter_kill SyscallEnterDetails_kill
   | DetailedSyscallEnter_clone SyscallEnterDetails_clone
+  | DetailedSyscallEnter_prlimit64 SyscallEnterDetails_prlimit64
+  | DetailedSyscallEnter_chdir SyscallEnterDetails_chdir
+  | DetailedSyscallEnter_fchdir SyscallEnterDetails_fchdir
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1721,6 +1803,9 @@ data DetailedSyscallExit
   | DetailedSyscallExit_sched_yield SyscallExitDetails_sched_yield
   | DetailedSyscallExit_kill SyscallExitDetails_kill
   | DetailedSyscallExit_clone SyscallExitDetails_clone
+  | DetailedSyscallExit_prlimit64 SyscallExitDetails_prlimit64
+  | DetailedSyscallExit_chdir SyscallExitDetails_chdir
+  | DetailedSyscallExit_fchdir SyscallExitDetails_fchdir
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2245,6 +2330,36 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , termSignal = termSignal
       , cloneFlags = cloneFlags
       }
+  Syscall_prlimit64 -> do
+    -- order of arguments for x86-64, x86-32 has ctid and newtls swapped
+    let SyscallArgs{ arg0 = pid', arg1 = resource
+                   , arg2 = new_limit, arg3 = old_limit } = syscallArgs
+    let new_limitAddr = word64ToPtr new_limit
+    let old_limitAddr = word64ToPtr old_limit
+    newLimit <- if new_limitAddr == nullPtr
+      then pure Nothing
+      else Just <$> Ptrace.peek (TracedProcess pid) new_limitAddr
+    pure $ DetailedSyscallEnter_prlimit64 $ SyscallEnterDetails_prlimit64
+      { pid = fromIntegral pid'
+      , resource = fromIntegral resource
+      , new_limit = new_limitAddr
+      , old_limit = old_limitAddr
+      , rlimitType = fromCInt (fromIntegral resource)
+      , newLimit
+      }
+  Syscall_chdir -> do
+    let SyscallArgs{ arg0 = path } = syscallArgs
+        pathPtr = word64ToPtr path
+    pathBS <- peekNullTerminatedBytes proc pathPtr
+    pure $ DetailedSyscallEnter_chdir $ SyscallEnterDetails_chdir
+      { path = pathPtr
+      , pathBS
+      }
+  Syscall_fchdir -> do
+    let SyscallArgs{ arg0 = fd } = syscallArgs
+    pure $ DetailedSyscallEnter_fchdir $ SyscallEnterDetails_fchdir
+      { fd = fromIntegral fd
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2546,6 +2661,27 @@ getSyscallExitDetails detailedSyscallEnter result pid =
             { enterDetail
             , childPid = fromIntegral result
             }
+
+    DetailedSyscallEnter_prlimit64
+      enterDetail@SyscallEnterDetails_prlimit64{ old_limit } -> do
+        oldLimit <- if old_limit == nullPtr
+          then pure Nothing
+          else Just <$> Ptrace.peek (TracedProcess pid) old_limit
+        pure $ DetailedSyscallExit_prlimit64 $
+          SyscallExitDetails_prlimit64
+            { enterDetail
+            , oldLimit = oldLimit
+            }
+
+    DetailedSyscallEnter_chdir
+      enterDetail@SyscallEnterDetails_chdir{} -> do
+        pure $ DetailedSyscallExit_chdir $
+          SyscallExitDetails_chdir { enterDetail }
+
+    DetailedSyscallEnter_fchdir
+      enterDetail@SyscallEnterDetails_fchdir{} -> do
+        pure $ DetailedSyscallExit_fchdir $
+          SyscallExitDetails_fchdir { enterDetail }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -3035,6 +3171,12 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_clone details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_prlimit64 details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_chdir details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_fchdir details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3169,6 +3311,12 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_kill details -> formatDetails details
 
     DetailedSyscallExit_clone details -> formatDetails details
+
+    DetailedSyscallExit_prlimit64 details -> formatDetails details
+
+    DetailedSyscallExit_chdir details -> formatDetails details
+
+    DetailedSyscallExit_fchdir details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
