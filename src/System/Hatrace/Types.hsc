@@ -59,6 +59,7 @@ module System.Hatrace.Types
   , RLimitType(..)
   , ResourceType(..)
   , RLimitStruct(..)
+  , IovecStruct(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -66,10 +67,11 @@ import           Data.Bits
 import           Data.List (intercalate)
 import           Data.Map (lookup)
 import           Data.Maybe (catMaybes)
+import           Data.Void (Void)
 import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..))
 import           Foreign.Marshal (copyBytes)
 import           Foreign.Marshal.Array (peekArray, pokeArray)
-import           Foreign.Ptr (plusPtr, castPtr)
+import           Foreign.Ptr (plusPtr, castPtr, Ptr)
 import           Foreign.ForeignPtr (withForeignPtr, newForeignPtr_)
 import           Foreign.Storable (Storable(..))
 import qualified System.Posix.Signals as Signals hiding (inSignalSet)
@@ -1729,3 +1731,23 @@ $(deriveEnumTypeClasses ''RLimitType
   , ('ResourceRTPrio, (#const RLIMIT_RTPRIO), "RLIMIT_RTPRIO")
   , ('ResourceRTTime, (#const RLIMIT_RTTIME), "RLIMIT_RTTIME")
   ])
+
+data IovecStruct = IovecStruct
+  { iov_base :: Ptr Void  -- ^ Starting address
+  , iov_len :: CULong -- ^ Number of bytes to transfer
+  }  deriving (Eq, Ord, Show)
+
+instance ArgFormatting IovecStruct where
+  formatArg  (IovecStruct {..}) =
+    StructArg [("iov_base", formatArg iov_base), ("iov_len", formatArg iov_len)]
+
+instance Storable IovecStruct where
+  sizeOf _ = #{size struct iovec}
+  alignment _ = #{alignment struct iovec}
+  peek p = do
+    iov_base <- #{peek struct iovec, iov_base} p
+    iov_len <- #{peek struct iovec, iov_len} p
+    return IovecStruct{..}
+  poke p IovecStruct{..} = do
+    #{poke struct iovec, iov_base} p iov_base
+    #{poke struct iovec, iov_len} p iov_len

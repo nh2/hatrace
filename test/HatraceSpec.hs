@@ -12,6 +12,7 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as B8
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
@@ -24,7 +25,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Foreign.C.Error (Errno(..), eBADF, eCONNRESET)
 import           Foreign.Marshal.Alloc (alloca)
-import           Foreign.Ptr (nullPtr, plusPtr)
+import           Foreign.Ptr (nullPtr, plusPtr, ptrToWordPtr)
 import           Foreign.Storable (sizeOf, peek, poke)
 import           System.FilePath (takeFileName, takeDirectory)
 import           System.Directory (doesFileExist, removeFile)
@@ -115,6 +116,41 @@ spec = before_ assertNoChildren $ do
         exitCode <- traceForkProcess "example-programs-build/segfault" [] muted
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
+
+  describe "writev" $ do
+    it "cant peek correct values of struct iov and number of byte written" $ do
+      callProcess "make" ["--quiet", "example-programs-build/writev"]
+
+      argv <- procToArgv "example-programs-build/writev" []
+      (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+      exitCode `shouldBe` ExitSuccess
+
+      let [(stdinReads, (iov1:iov2:_), writtenCount_)] =
+              [ (bufContents, iovs, writtenCount)
+              | (_pid
+                , Right (
+                    DetailedSyscallExit_writev
+                      SyscallExitDetails_writev
+                        { enterDetail = SyscallEnterDetails_writev{ fd = 1, bufContents, iovs }
+                        , writtenCount
+                        }
+                    )
+                ) <- events
+              ]
+      -- The example program prints out some expected values, we retrieve them relying on the write syscall
+      let (expectedCount:expectedVect1:expectedVect2:_) = [ bufContents |
+                 (_pid, Right (
+                          DetailedSyscallExit_write
+                            SyscallExitDetails_write{ enterDetail = SyscallEnterDetails_write { bufContents } }
+                          )
+                 ) <- events
+                 ]
+      stdinReads `shouldBe` ["hello ", "world\n"]
+      fromIntegral writtenCount_ `shouldBe` (read (B8.unpack expectedCount) :: Int)
+      fromIntegral (ptrToWordPtr $ iov_base iov1) `shouldBe` (read (B8.unpack expectedVect1) :: Int)
+      fromIntegral (ptrToWordPtr $ iov_base iov2) `shouldBe` (read (B8.unpack expectedVect2) :: Int)
 
   describe "sourceRawTraceForkExecvFullPathWithSink" $ do
 
