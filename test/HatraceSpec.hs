@@ -12,6 +12,7 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.IO.Unlift (MonadUnliftIO)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as B8
 import           Data.Conduit
 import qualified Data.Conduit.Combinators as CC
 import qualified Data.Conduit.List as CL
@@ -69,6 +70,10 @@ makeAtomicWriteExample :: IO ()
 makeAtomicWriteExample =
   callProcess "make" ["--quiet", "example-programs-build/atomic-write"]
 
+makeIovecExample :: IO ()
+makeIovecExample =
+  callProcess "make" ["--quiet", "example-programs-build/iovec"]
+
 spec :: Spec
 spec = before_ assertNoChildren $ do
   -- Note we use `before_` instead of `after_` above because apparently,
@@ -115,6 +120,39 @@ spec = before_ assertNoChildren $ do
         exitCode <- traceForkProcess "example-programs-build/segfault" [] muted
         exitCode `shouldSatisfy` \x ->
           x `elem` [ExitFailure 11, ExitFailure (128+11)]
+
+  describe "iovec" $ do
+    it "iovec" $ do
+      makeIovecExample
+
+      argv <- procToArgv "example-programs-build/iovec" []
+      (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+      let [(stdinReads, (iov1:iov2:_), writtenCount_)] =
+              [ (bufContents, iovs, writtenCount)
+              | (_pid
+                , Right (
+                    DetailedSyscallExit_writev
+                      SyscallExitDetails_writev
+                        { enterDetail = SyscallEnterDetails_writev{ fd = 1, bufContents, iovs }
+                        , writtenCount
+                        }
+                    )
+                ) <- events
+              ]
+      let (count:vect1:vect2:_) = [ bufContents |
+                 (_pid, Right (
+                          DetailedSyscallExit_write
+                            SyscallExitDetails_write{ enterDetail = SyscallEnterDetails_write { bufContents } }
+                          )
+                 ) <- events
+                 ]
+      stdinReads `shouldBe` ["hello ", "world\n"]
+      fromIntegral writtenCount_ `shouldBe` (read (B8.unpack count) :: Int)
+      fromIntegral (iov_base iov1) `shouldBe`  (read (B8.unpack vect1) :: Int)
+      fromIntegral (iov_base iov2) `shouldBe`  (read (B8.unpack vect2) :: Int)
+      exitCode `shouldBe` ExitSuccess
 
   describe "sourceRawTraceForkExecvFullPathWithSink" $ do
 

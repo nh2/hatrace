@@ -26,8 +26,9 @@ import qualified Data.Text.Encoding.Error as TE
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Data.Void (Void)
 import           Data.Word (Word64)
-import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
+import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..), CUIntPtr)
 import           Foreign.Ptr (Ptr, nullPtr, ptrToIntPtr)
+import           Numeric
 import           System.Posix.Types (CMode(..), CPid(..), CUid(..), CGid(..))
 
 class SyscallEnterFormatting a where
@@ -98,6 +99,9 @@ instance ArgFormatting CTime where
 instance ArgFormatting (Ptr Void) where
   formatArg = formatPtrArg "void"
 
+instance ArgFormatting CUIntPtr where
+  formatArg = HexadecimalArg . fromIntegral
+
 formatPtrArg :: String -> Ptr a -> FormattedArg
 formatPtrArg type_ p
   | p == nullPtr = FixedStringArg "NULL"
@@ -113,6 +117,7 @@ instance ArgFormatting a => ArgFormatting [a] where
 
 data FormattedArg
   = IntegerArg Integer -- using Integer to accept both Int64 and Word64 at the same time
+  | HexadecimalArg Integer
   | FixedStringArg String
   | VarLengthStringArg String
   | ListArg [FormattedArg]
@@ -122,6 +127,7 @@ data FormattedArg
 instance ToJSON FormattedArg where
   toJSON arg = case arg of
     IntegerArg n -> toJSON n
+    HexadecimalArg n -> toJSON $ "0x" ++ showHex n ""
     FixedStringArg s -> toJSON s
     VarLengthStringArg s -> toJSON s
     ListArg xs -> toJSON xs
@@ -163,6 +169,7 @@ argToString :: StringFormattingOptions -> FormattedArg -> String
 argToString options arg =
   case arg of
     IntegerArg n -> show n
+    HexadecimalArg n -> "0x" ++ showHex n ""
     FixedStringArg s -> s
     VarLengthStringArg s -> limitedString s
     ListArg elements -> listToString elements

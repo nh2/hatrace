@@ -40,6 +40,8 @@ module System.Hatrace
   , SyscallExitDetails_faccessat(..)
   , SyscallEnterDetails_write(..)
   , SyscallExitDetails_write(..)
+  , SyscallEnterDetails_writev(..)
+  , SyscallExitDetails_writev(..)
   , SyscallEnterDetails_read(..)
   , SyscallExitDetails_read(..)
   , SyscallEnterDetails_close(..)
@@ -193,7 +195,7 @@ import           Foreign.Marshal.Alloc (alloca)
 import           Foreign.Marshal.Array (withArray)
 import qualified Foreign.Marshal.Array (peekArray)
 import           Foreign.Marshal.Utils (withMany)
-import           Foreign.Ptr (castPtr, Ptr, nullPtr, wordPtrToPtr)
+import           Foreign.Ptr (castPtr, Ptr, nullPtr, wordPtrToPtr, intPtrToPtr)
 import           Foreign.Storable (Storable, peekByteOff, sizeOf)
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
@@ -1813,6 +1815,32 @@ instance SyscallExitFormatting SyscallExitDetails_rmdir where
   syscallExitToFormatted SyscallExitDetails_rmdir{ enterDetail } =
     (syscallEnterToFormatted enterDetail, NoReturn)
 
+data SyscallEnterDetails_writev = SyscallEnterDetails_writev
+  { fd :: CInt
+  , count :: CSize
+  , iovs :: [IovecStruct]
+  -- Peeked details
+  , bufContents :: [ByteString]
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_writev where
+  syscallEnterToFormatted SyscallEnterDetails_writev{ fd, bufContents, count } =
+    FormattedSyscall "writev" [formatArg fd, argPlaceholder "*iovec", formatArg bufContents, formatArg count]
+
+data SyscallExitDetails_writev = SyscallExitDetails_writev
+  { enterDetail :: SyscallEnterDetails_writev
+  , writtenCount :: CSize
+  -- Peeked details
+  , iovsData :: [IovecStruct]
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_writev where
+  syscallExitToFormatted SyscallExitDetails_writev{ enterDetail, writtenCount, iovsData } =
+    ( FormattedSyscall "writev" [formatArg fd, formatArg writtenCount, formatArg iovsData]
+    , NoReturn
+    )
+    where
+      SyscallEnterDetails_writev{ fd } = enterDetail
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -1823,6 +1851,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_access SyscallEnterDetails_access
   | DetailedSyscallEnter_faccessat SyscallEnterDetails_faccessat
   | DetailedSyscallEnter_write SyscallEnterDetails_write
+  | DetailedSyscallEnter_writev SyscallEnterDetails_writev
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
   | DetailedSyscallEnter_close SyscallEnterDetails_close
@@ -1885,6 +1914,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_access SyscallExitDetails_access
   | DetailedSyscallExit_faccessat SyscallExitDetails_faccessat
   | DetailedSyscallExit_write SyscallExitDetails_write
+  | DetailedSyscallExit_writev SyscallExitDetails_writev
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
   | DetailedSyscallExit_close SyscallExitDetails_close
@@ -2042,6 +2072,17 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , buf = bufPtr
       , count = fromIntegral count
       , bufContents
+      }
+  Syscall_writev -> do
+    let SyscallArgs{ arg0 = fd, arg1 = iovBasePtr, arg2 = iovcnt } = syscallArgs
+        n = fromIntegral $ min iovcnt $ fromIntegral (maxBound :: Int)
+    iovs <- peekStructArray (TracedProcess pid) iovecStructSize n (word64ToPtr iovBasePtr)
+    contents <- mapM (\IovecStruct{ iov_base = base, iov_len = len } -> peekBytes proc (intPtrToPtr $ fromIntegral base) (fromIntegral len)) iovs
+    pure $ DetailedSyscallEnter_writev $ SyscallEnterDetails_writev
+      { fd = fromIntegral fd
+      , iovs = iovs
+      , count = fromIntegral iovcnt
+      , bufContents = contents
       }
   Syscall_read -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
@@ -2577,6 +2618,11 @@ getSyscallExitDetails detailedSyscallEnter result pid =
         pure $ DetailedSyscallExit_write $
           SyscallExitDetails_write{ enterDetail, writtenCount = fromIntegral result }
 
+    DetailedSyscallEnter_writev
+      enterDetail@SyscallEnterDetails_writev{ iovs } -> do
+        pure $ DetailedSyscallExit_writev $
+          SyscallExitDetails_writev{ enterDetail, writtenCount = fromIntegral result, iovsData = iovs }
+
     DetailedSyscallEnter_access
       enterDetail@SyscallEnterDetails_access{} -> do
         pure $ DetailedSyscallExit_access $
@@ -2871,6 +2917,15 @@ getSyscallExitDetails detailedSyscallEnter result pid =
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+
+peekStructArray :: Storable a => TracedProcess -> Int -> Int -> Ptr a -> IO [a]
+peekStructArray pid size count ptr
+  | size <= 0 = return []
+  | count <= 0 = return []
+  | otherwise = do
+      arrayBytes <- Ptrace.peekBytes pid ptr (size * count)
+      let (tmpPtr, _, _) = BSI.toForeignPtr arrayBytes
+      withForeignPtr tmpPtr (\p -> Foreign.Marshal.Array.peekArray count (castPtr p))
 
 peekArray :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
 peekArray pid size ptr
@@ -3277,6 +3332,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_write details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_writev details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_read details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_close details -> syscallEnterToFormatted details
@@ -3429,6 +3486,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_faccessat details -> formatDetails details
 
     DetailedSyscallExit_write details -> formatDetails details
+
+    DetailedSyscallExit_writev details -> formatDetails details
 
     DetailedSyscallExit_read details -> formatDetails details
 
