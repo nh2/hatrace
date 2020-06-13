@@ -15,7 +15,7 @@ int main(int argc, char* argv[]) {
   const char* directory = argv[1];
   int retval = mkdir(directory, S_IRWXU);
   if (retval != 0) {
-    printf("couldn't mkdir directory %s", directory);
+    fprintf(stderr, "couldn't mkdir directory %s\n", directory);
   }
 
   return retval;

@@ -15,7 +15,7 @@ int main(int argc, char* argv[]) {
   const char* directory = argv[1];
   int retval = rmdir(directory);
   if (retval != 0) {
-    printf("couldn't rmdir directory %s", directory);
+    fprintf(stderr, "couldn't rmdir directory %s\n", directory);
   }
 
   return retval;

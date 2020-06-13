@@ -17,7 +17,7 @@ int main(int argc, char* argv[]) {
 
   int retval = chdir(directory);
   if (retval != 0) {
-    printf("couldn't chdir to directory %s", directory);
+    fprintf(stderr, "couldn't chdir to directory %s\n", directory);
   }
 
   return retval;

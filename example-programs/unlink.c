@@ -9,13 +9,13 @@ int main(int argc, char* argv[]) {
 
   const char* filepath = argv[1];
   if (access(filepath, 0) != 0) {
-    printf("couldn't access filepath %s", filepath);
+    fprintf(stderr, "couldn't access filepath %s\n", filepath);
     return 2;
   }
 
   int retval = unlink(filepath);
   if (retval != 0) {
-    printf("couldn't unlink file %s", filepath);
+    fprintf(stderr, "couldn't unlink file %s\n", filepath);
   }
 
   return retval;
