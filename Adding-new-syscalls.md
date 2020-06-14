@@ -38,11 +38,13 @@ For handling C structs see some examples in the module `System.Hatrace.Types`.
 
 So in general to add a new syscall `foo` to `hatrace` one needs to do the following:
 
-0. (Optional) Add custom types for marshalling complex argument types to the module `System.Hatrace.Types` if those are required.
+0. (Optional) Add custom types for marshalling complex argument types to the module `System.Hatrace.Types` if those are required:
+    1. Add or edit a new describe procedure.
+    2. Validate running `stack test --ta "-m XXX"` where XXX match the modified describe procedure.
 1. **Enter** details:
     1. Create data type `SyscallEnterDetails_foo`.
     2. Add an entry for it in the type `DetailedSyscallEnter` sum type.
-    3. Update `getSyscallEnterDetails` accordingly.
+    3. Update `getSyscallEnterDetails` accordingly (add above _unknown).
     4. Add an instance of `SyscallEnterFormatting` and update `formatSyscallEnter` accordingly.
 2. **Exit** details:
     1. Create data type `SyscallExitDetails_foo`.
