@@ -1268,3 +1268,42 @@ spec = before_ assertNoChildren $ do
                 ]
           directories `shouldBe` [T.encodeUtf8 (T.pack directoryToRm)]
 
+    describe "truncate" $
+      it "occurs when we truncate a file" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        let testProgram = "example-programs-build/truncate"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [tmpFile, "10"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let tmpFileTruncateEvents =
+              [ pathBS
+              | (_pid
+                , Right (DetailedSyscallExit_truncate
+                         SyscallExitDetails_truncate
+                         { enterDetail = SyscallEnterDetails_truncate{ pathBS }})
+                ) <- events
+                , pathBS == T.encodeUtf8 (T.pack tmpFile)
+              ]
+        length tmpFileTruncateEvents `shouldBe` 1
+
+    describe "ftruncate" $
+      it "occurs when we ftruncate a file" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        let testProgram = "example-programs-build/ftruncate"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [tmpFile, "10"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let tmpFileFtruncateEvents =
+              [ ()
+              | (_pid
+                , Right (DetailedSyscallExit_ftruncate _)
+                ) <- events
+              ]
+        length tmpFileFtruncateEvents `shouldBe` 1
+
