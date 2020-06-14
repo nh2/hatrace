@@ -28,6 +28,7 @@ import           Data.Void (Void)
 import           Data.Word (Word64)
 import           Foreign.C.Types (CShort(..), CUShort(..), CInt(..), CUInt(..), CLong(..), CULong(..), CSize(..), CTime(..))
 import           Foreign.Ptr (Ptr, nullPtr, ptrToIntPtr)
+import           Numeric
 import           System.Posix.Types (CMode(..), CPid(..), CUid(..), CGid(..), COff(..))
 
 class SyscallEnterFormatting a where
@@ -105,7 +106,7 @@ formatPtrArg :: String -> Ptr a -> FormattedArg
 formatPtrArg type_ p
   | p == nullPtr = FixedStringArg "NULL"
   | otherwise =
-    FixedStringArg $ "*" ++ type_ ++ "(" ++ show (toInteger $ ptrToIntPtr p) ++ ")"
+    FixedStringArg $ "*" ++ type_ ++ "(0x" ++ showHex (toInteger $ ptrToIntPtr p) "" ++ ")"
 
 formatNullableArg :: ArgFormatting a => Maybe a -> FormattedArg
 formatNullableArg Nothing = FixedStringArg "NULL"
