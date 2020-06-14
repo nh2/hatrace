@@ -34,6 +34,8 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/madvise
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/chdir
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mkdir
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/rmdir
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/truncate
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/ftruncate
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
@@ -69,6 +71,10 @@ $(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.asm
 $(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.c
 	mkdir -p $(EXAMPLE_DST)
 	gcc -static -std=c99 -Wall -Werror $< -o $@
+
+$(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%-gnu.c
+	mkdir -p $(EXAMPLE_DST)
+	gcc -static -std=gnu99 -Wall -Werror $< -o $@
 
 
 example-programs-build/mmap-syscall: example-programs/mmap-syscall.c
