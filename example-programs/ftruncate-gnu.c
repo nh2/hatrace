@@ -18,7 +18,8 @@ int main(int argc, char* argv[]) {
   int size = atoi(argv[2]);
   int fd = open(filename, O_RDWR);
   if (fd < 0) {
-    fprintf(stderr, "could not open file %s\n", filename);
+    perror("could not open file\n");
+    return fd;
   }
   int retval = ftruncate(fd, size);
   if (retval != 0) {

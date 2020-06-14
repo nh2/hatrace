@@ -214,7 +214,7 @@ import           System.Linux.Ptrace.X86Regs (X86Regs(..))
 import           System.Posix.Files (readSymbolicLink)
 import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
-import           System.Posix.Types (CPid(..), CMode(..), CUid(..), CGid(..))
+import           System.Posix.Types (CPid(..), CMode(..), CUid(..), CGid(..), COff(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..), Flag(..))
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
@@ -1818,15 +1818,15 @@ instance SyscallExitFormatting SyscallExitDetails_rmdir where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 data SyscallEnterDetails_truncate = SyscallEnterDetails_truncate
-  { pathname :: Ptr CChar
-  , size :: CInt
+  { path :: Ptr CChar
+  , length_ :: COff
   -- Peeked details
-  , pathnameBS :: ByteString
+  , pathBS :: ByteString
   } deriving (Eq, Ord, Show)
 
 instance SyscallEnterFormatting SyscallEnterDetails_truncate where
-  syscallEnterToFormatted SyscallEnterDetails_truncate{ pathnameBS, size } =
-    FormattedSyscall "truncate" [formatArg pathnameBS, formatArg size]
+  syscallEnterToFormatted SyscallEnterDetails_truncate{ pathBS, length_ } =
+    FormattedSyscall "truncate" [formatArg pathBS, formatArg length_]
 
 
 data SyscallExitDetails_truncate = SyscallExitDetails_truncate
@@ -1839,12 +1839,12 @@ instance SyscallExitFormatting SyscallExitDetails_truncate where
 
 data SyscallEnterDetails_ftruncate = SyscallEnterDetails_ftruncate
   { fd :: CInt
-  , size :: CInt
+  , length_ :: COff
   } deriving (Eq, Ord, Show)
 
 instance SyscallEnterFormatting SyscallEnterDetails_ftruncate where
-  syscallEnterToFormatted SyscallEnterDetails_ftruncate{ fd, size } =
-    FormattedSyscall "ftruncate" [formatArg fd, formatArg size]
+  syscallEnterToFormatted SyscallEnterDetails_ftruncate{ fd, length_ } =
+    FormattedSyscall "ftruncate" [formatArg fd, formatArg length_]
 
 
 data SyscallExitDetails_ftruncate = SyscallExitDetails_ftruncate
@@ -2565,19 +2565,19 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , pathnameBS
       }
   Syscall_truncate -> do
-    let SyscallArgs{ arg0 = pathnameAddr, arg1 = size } = syscallArgs
-    let pathnamePtr = word64ToPtr pathnameAddr
-    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    let SyscallArgs{ arg0 = pathAddr, arg1 = length_ } = syscallArgs
+    let pathPtr = word64ToPtr pathAddr
+    pathBS <- peekNullTerminatedBytes proc pathPtr
     pure $ DetailedSyscallEnter_truncate $ SyscallEnterDetails_truncate
-      { pathname = pathnamePtr
-      , size = fromIntegral size
-      , pathnameBS
+      { path = pathPtr
+      , length_ = fromIntegral length_
+      , pathBS
       }
   Syscall_ftruncate -> do
-    let SyscallArgs{ arg0 = fd, arg1 = size } = syscallArgs
+    let SyscallArgs{ arg0 = fd, arg1 = length_ } = syscallArgs
     pure $ DetailedSyscallEnter_ftruncate $ SyscallEnterDetails_ftruncate
       { fd = fromIntegral fd
-      , size = fromIntegral size
+      , length_ = fromIntegral length_
       }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 

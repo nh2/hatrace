@@ -1246,15 +1246,15 @@ spec = before_ assertNoChildren $ do
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
         let tmpFileTruncateEvents =
-              [ pathnameBS
+              [ pathBS
               | (_pid
                 , Right (DetailedSyscallExit_truncate
                          SyscallExitDetails_truncate
-                         { enterDetail = SyscallEnterDetails_truncate{ pathnameBS }})
+                         { enterDetail = SyscallEnterDetails_truncate{ pathBS }})
                 ) <- events
-                , pathnameBS == T.encodeUtf8 (T.pack tmpFile)
+                , pathBS == T.encodeUtf8 (T.pack tmpFile)
               ]
-        tmpFileTruncateEvents `shouldSatisfy` (not . null)
+        tmpFileTruncateEvents `shouldSatisfy` ((== 1) . length)
 
     describe "ftruncate" $
       it "occurs when we ftruncate a file" $ do
@@ -1270,5 +1270,5 @@ spec = before_ assertNoChildren $ do
                 , Right (DetailedSyscallExit_ftruncate _)
                 ) <- events
               ]
-        tmpFilefFtruncateEvents `shouldSatisfy` (not . null)
+        tmpFilefFtruncateEvents `shouldSatisfy` ((== 1) . length)
 
