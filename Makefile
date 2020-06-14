@@ -72,13 +72,9 @@ $(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%.c
 	mkdir -p $(EXAMPLE_DST)
 	gcc -static -std=c99 -Wall -Werror $< -o $@
 
-example-programs-build/truncate: example-programs/truncate.c
+$(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%-gnu.c
 	mkdir -p $(EXAMPLE_DST)
-	gcc -static -std=gnu99 -Wall -Werror example-programs/truncate.c -o example-programs-build/truncate
-
-example-programs-build/ftruncate: example-programs/ftruncate.c
-	mkdir -p $(EXAMPLE_DST)
-	gcc -static -std=gnu99 -Wall -Werror example-programs/ftruncate.c -o example-programs-build/ftruncate
+	gcc -static -std=gnu99 -Wall -Werror $< -o $@
 
 
 example-programs-build/mmap-syscall: example-programs/mmap-syscall.c
