@@ -651,6 +651,15 @@ spec = before_ assertNoChildren $ do
               ]
         pipeEvents `shouldSatisfy` (not . null)
 
+    describe "dup" $ do
+       it "Syscall_dup2 is identified" $ do
+         argv <- procToArgv "sh" ["-c", "echo 'foo' | cat"]
+         (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
+
+         let syscalls = [ syscall | (_pid, SyscallStop SyscallEnter (syscall, _args)) <- events ]
+         exitCode `shouldBe` ExitSuccess
+         syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_dup2 `elem` xs)
+
     describe "access" $ do
       it "seen when invoked in a program" $ do
         let accessItself = "example-programs-build/access-itself"
