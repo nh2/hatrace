@@ -1814,6 +1814,26 @@ instance SyscallExitFormatting SyscallExitDetails_rmdir where
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
+data SyscallEnterDetails_lseek = SyscallEnterDetails_lseek
+  { fd :: CInt
+  , offset :: CSize
+  , whence :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_lseek where
+  syscallEnterToFormatted SyscallEnterDetails_lseek{ fd, offset, whence } =
+    FormattedSyscall "lseek" [formatArg fd, formatArg offset, formatArg whence]
+
+data SyscallExitDetails_lseek = SyscallExitDetails_lseek
+  { enterDetail :: SyscallEnterDetails_lseek
+  , offset :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_lseek where
+  syscallExitToFormatted SyscallExitDetails_lseek{ enterDetail, offset } =
+    (syscallEnterToFormatted enterDetail, formatReturn offset)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1872,6 +1892,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_mkdir SyscallEnterDetails_mkdir
   | DetailedSyscallEnter_mkdirat SyscallEnterDetails_mkdirat
   | DetailedSyscallEnter_rmdir SyscallEnterDetails_rmdir
+  | DetailedSyscallEnter_lseek SyscallEnterDetails_lseek
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1934,6 +1955,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_mkdir SyscallExitDetails_mkdir
   | DetailedSyscallExit_mkdirat SyscallExitDetails_mkdirat
   | DetailedSyscallExit_rmdir SyscallExitDetails_rmdir
+  | DetailedSyscallExit_lseek SyscallExitDetails_lseek
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2517,6 +2539,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { pathname = pathnamePtr
       , pathnameBS
       }
+  Syscall_lseek -> do
+    let SyscallArgs{ arg0 = fd', arg1 = offset', arg2 = whence' } = syscallArgs
+    pure $ DetailedSyscallEnter_lseek $ SyscallEnterDetails_lseek
+      { fd = fromIntegral fd'
+      , offset = fromIntegral offset'
+      , whence = fromIntegral whence'
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2868,6 +2897,11 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_rmdir{} -> do
         pure $ DetailedSyscallExit_rmdir $
           SyscallExitDetails_rmdir { enterDetail }
+
+    DetailedSyscallEnter_lseek
+      enterDetail@SyscallEnterDetails_lseek{} -> do
+        pure $ DetailedSyscallExit_lseek $
+          SyscallExitDetails_lseek { enterDetail, offset = fromIntegral result }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -3375,6 +3409,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_rmdir details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_lseek details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3527,6 +3563,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_mkdirat details -> formatDetails details
 
     DetailedSyscallExit_rmdir details -> formatDetails details
+
+    DetailedSyscallExit_lseek details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result

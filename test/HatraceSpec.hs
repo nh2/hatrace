@@ -485,6 +485,16 @@ spec = before_ assertNoChildren $ do
          exitCode `shouldBe` ExitSuccess
          syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_exit_group `elem` xs)
 
+    describe "lseek" $ do
+
+       it "Syscall_lseek is identified" $ do
+         argv <- procToArgv "tail" ["/proc/cpuinfo"]
+         (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
+
+         let syscalls = [ syscall | (_pid, SyscallStop SyscallEnter (syscall, _args)) <- events ]
+         exitCode `shouldBe` ExitSuccess
+         syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_lseek `elem` xs)
+
     describe "execve" $ do
 
       let runExecveProgram :: FilePath -> FilePath -> IO (ExitCode, [(ByteString, Int)])
