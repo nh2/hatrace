@@ -1237,3 +1237,38 @@ spec = before_ assertNoChildren $ do
                 ]
           directories `shouldBe` [T.encodeUtf8 (T.pack directoryToRm)]
 
+    describe "truncate" $
+      it "occurs when we truncate a file" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        argv <- procToArgv "example-programs-build/truncate" [tmpFile, "10"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let tmpFileTruncateEvents =
+              [ pathnameBS
+              | (_pid
+                , Right (DetailedSyscallExit_truncate
+                         SyscallExitDetails_truncate
+                         { enterDetail = SyscallEnterDetails_truncate{ pathnameBS }})
+                ) <- events
+                , pathnameBS == T.encodeUtf8 (T.pack tmpFile)
+              ]
+        tmpFileTruncateEvents `shouldSatisfy` (not . null)
+
+    describe "ftruncate" $
+      it "occurs when we ftruncate a file" $ do
+        tmpFile <- emptySystemTempFile "test-output"
+        argv <- procToArgv "example-programs-build/ftruncate" [tmpFile, "10"]
+        (exitCode, events) <-
+          sourceTraceForkExecvFullPathWithSink argv $
+            syscallExitDetailsOnlyConduit .| CL.consume
+        exitCode `shouldBe` ExitSuccess
+        let tmpFilefFtruncateEvents =
+              [ ()
+              | (_pid
+                , Right (DetailedSyscallExit_ftruncate _)
+                ) <- events
+              ]
+        tmpFilefFtruncateEvents `shouldSatisfy` (not . null)
+

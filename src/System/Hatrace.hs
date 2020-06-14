@@ -138,6 +138,10 @@ module System.Hatrace
   , SyscallExitDetails_mkdirat(..)
   , SyscallEnterDetails_rmdir(..)
   , SyscallExitDetails_rmdir(..)
+  , SyscallEnterDetails_truncate(..)
+  , SyscallExitDetails_truncate(..)
+  , SyscallEnterDetails_ftruncate(..)
+  , SyscallExitDetails_ftruncate(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
   , ERRNO(..)
@@ -1813,6 +1817,45 @@ instance SyscallExitFormatting SyscallExitDetails_rmdir where
   syscallExitToFormatted SyscallExitDetails_rmdir{ enterDetail } =
     (syscallEnterToFormatted enterDetail, NoReturn)
 
+data SyscallEnterDetails_truncate = SyscallEnterDetails_truncate
+  { pathname :: Ptr CChar
+  , size :: CInt
+  -- Peeked details
+  , pathnameBS :: ByteString
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_truncate where
+  syscallEnterToFormatted SyscallEnterDetails_truncate{ pathnameBS, size } =
+    FormattedSyscall "truncate" [formatArg pathnameBS, formatArg size]
+
+
+data SyscallExitDetails_truncate = SyscallExitDetails_truncate
+  { enterDetail :: SyscallEnterDetails_truncate
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_truncate where
+  syscallExitToFormatted SyscallExitDetails_truncate{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+data SyscallEnterDetails_ftruncate = SyscallEnterDetails_ftruncate
+  { fd :: CInt
+  , size :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_ftruncate where
+  syscallEnterToFormatted SyscallEnterDetails_ftruncate{ fd, size } =
+    FormattedSyscall "ftruncate" [formatArg fd, formatArg size]
+
+
+data SyscallExitDetails_ftruncate = SyscallExitDetails_ftruncate
+  { enterDetail :: SyscallEnterDetails_ftruncate
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_ftruncate where
+  syscallExitToFormatted SyscallExitDetails_ftruncate{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
@@ -1872,6 +1915,8 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_mkdir SyscallEnterDetails_mkdir
   | DetailedSyscallEnter_mkdirat SyscallEnterDetails_mkdirat
   | DetailedSyscallEnter_rmdir SyscallEnterDetails_rmdir
+  | DetailedSyscallEnter_truncate SyscallEnterDetails_truncate
+  | DetailedSyscallEnter_ftruncate SyscallEnterDetails_ftruncate
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1934,6 +1979,8 @@ data DetailedSyscallExit
   | DetailedSyscallExit_mkdir SyscallExitDetails_mkdir
   | DetailedSyscallExit_mkdirat SyscallExitDetails_mkdirat
   | DetailedSyscallExit_rmdir SyscallExitDetails_rmdir
+  | DetailedSyscallExit_truncate SyscallExitDetails_truncate
+  | DetailedSyscallExit_ftruncate SyscallExitDetails_ftruncate
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2517,6 +2564,21 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { pathname = pathnamePtr
       , pathnameBS
       }
+  Syscall_truncate -> do
+    let SyscallArgs{ arg0 = pathnameAddr, arg1 = size } = syscallArgs
+    let pathnamePtr = word64ToPtr pathnameAddr
+    pathnameBS <- peekNullTerminatedBytes proc pathnamePtr
+    pure $ DetailedSyscallEnter_truncate $ SyscallEnterDetails_truncate
+      { pathname = pathnamePtr
+      , size = fromIntegral size
+      , pathnameBS
+      }
+  Syscall_ftruncate -> do
+    let SyscallArgs{ arg0 = fd, arg1 = size } = syscallArgs
+    pure $ DetailedSyscallEnter_ftruncate $ SyscallEnterDetails_ftruncate
+      { fd = fromIntegral fd
+      , size = fromIntegral size
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2868,6 +2930,16 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_rmdir{} -> do
         pure $ DetailedSyscallExit_rmdir $
           SyscallExitDetails_rmdir { enterDetail }
+
+    DetailedSyscallEnter_truncate
+      enterDetail@SyscallEnterDetails_truncate{} -> do
+        pure $ DetailedSyscallExit_truncate $
+          SyscallExitDetails_truncate { enterDetail }
+
+    DetailedSyscallEnter_ftruncate
+      enterDetail@SyscallEnterDetails_ftruncate{} -> do
+        pure $ DetailedSyscallExit_ftruncate $
+          SyscallExitDetails_ftruncate { enterDetail }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -3375,6 +3447,10 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_rmdir details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_truncate details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_ftruncate details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3527,6 +3603,10 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_mkdirat details -> formatDetails details
 
     DetailedSyscallExit_rmdir details -> formatDetails details
+
+    DetailedSyscallExit_truncate details -> formatDetails details
+
+    DetailedSyscallExit_ftruncate details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
