@@ -1817,6 +1817,8 @@ instance SyscallExitFormatting SyscallExitDetails_rmdir where
 data SyscallEnterDetails_lseek = SyscallEnterDetails_lseek
   { fd :: CInt
   , offset :: COff
+  , whenceRaw :: CInt
+  -- Peeked details
   , whence :: SeekWhence
   } deriving (Eq, Ord, Show)
 
@@ -2544,6 +2546,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_lseek $ SyscallEnterDetails_lseek
       { fd = fromIntegral fd'
       , offset = fromIntegral offset'
+      , whenceRaw = fromIntegral whence'
       , whence = fromCInt (fromIntegral whence')
       }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
