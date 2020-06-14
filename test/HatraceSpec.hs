@@ -1240,7 +1240,9 @@ spec = before_ assertNoChildren $ do
     describe "truncate" $
       it "occurs when we truncate a file" $ do
         tmpFile <- emptySystemTempFile "test-output"
-        argv <- procToArgv "example-programs-build/truncate" [tmpFile, "10"]
+        let testProgram = "example-programs-build/truncate"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [tmpFile, "10"]
         (exitCode, events) <-
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
@@ -1259,7 +1261,9 @@ spec = before_ assertNoChildren $ do
     describe "ftruncate" $
       it "occurs when we ftruncate a file" $ do
         tmpFile <- emptySystemTempFile "test-output"
-        argv <- procToArgv "example-programs-build/ftruncate" [tmpFile, "10"]
+        let testProgram = "example-programs-build/ftruncate"
+        callProcess "make" ["--quiet", testProgram]
+        argv <- procToArgv testProgram [tmpFile, "10"]
         (exitCode, events) <-
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
