@@ -1828,12 +1828,12 @@ instance SyscallEnterFormatting SyscallEnterDetails_lseek where
 
 data SyscallExitDetails_lseek = SyscallExitDetails_lseek
   { enterDetail :: SyscallEnterDetails_lseek
-  , offset :: COff
+  , resultingOffset :: COff
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_lseek where
-  syscallExitToFormatted SyscallExitDetails_lseek{ enterDetail, offset } =
-    (syscallEnterToFormatted enterDetail, formatReturn offset)
+  syscallExitToFormatted SyscallExitDetails_lseek{ enterDetail, resultingOffset } =
+    (syscallEnterToFormatted enterDetail, formatReturn resultingOffset)
 
 
 data DetailedSyscallEnter
@@ -2904,7 +2904,7 @@ getSyscallExitDetails detailedSyscallEnter result pid =
     DetailedSyscallEnter_lseek
       enterDetail@SyscallEnterDetails_lseek{} -> do
         pure $ DetailedSyscallExit_lseek $
-          SyscallExitDetails_lseek { enterDetail, offset = fromIntegral result }
+          SyscallExitDetails_lseek { enterDetail, resultingOffset = fromIntegral result }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
