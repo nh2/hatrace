@@ -2542,12 +2542,12 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , pathnameBS
       }
   Syscall_lseek -> do
-    let SyscallArgs{ arg0 = fd', arg1 = offset', arg2 = whence' } = syscallArgs
+    let SyscallArgs{ arg0 = fd, arg1 = offset, arg2 = whence } = syscallArgs
     pure $ DetailedSyscallEnter_lseek $ SyscallEnterDetails_lseek
-      { fd = fromIntegral fd'
-      , offset = fromIntegral offset'
-      , whenceRaw = fromIntegral whence'
-      , whence = fromCInt (fromIntegral whence')
+      { fd = fromIntegral fd
+      , offset = fromIntegral offset
+      , whenceRaw = fromIntegral whence
+      , whence = fromCInt (fromIntegral whence)
       }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
