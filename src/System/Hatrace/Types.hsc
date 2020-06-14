@@ -1741,10 +1741,22 @@ data SeekWhenceKnown
   = SeekSet -- ^ The file offset is set to offset bytes.
   | SeekCur -- ^ The file offset is set to its current location plus offset bytes.
   | SeekEnd -- ^ The file offset is set to the  size  of  the  file  plus offset bytes.
+#ifdef SEEK_DATA
+  | SeekData
+#endif
+#ifdef SEEK_HOLE
+  | SeekHole
+#endif
   deriving (Eq, Ord, Show)
 
 $(deriveEnumTypeClasses ''SeekWhence
   [ ('SeekSet, (#const SEEK_SET), "SEEK_SET")
   , ('SeekCur, (#const SEEK_CUR), "SEEK_CUR")
   , ('SeekEnd, (#const SEEK_END), "SEEK_END")
+#ifdef SEEK_DATA
+  , ('SeekData, (#const SEEK_DATA), "SEEK_DATA")
+#endif
+#ifdef SEEK_HOLE
+  , ('SeekHole, (#const SEEK_HOLE), "SEEK_HOLE")
+#endif
   ])
