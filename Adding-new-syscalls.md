@@ -36,7 +36,7 @@ String values are represented in 2 forms:
 
 For handling C structs see some examples in the module `System.Hatrace.Types`.
 
-For handling C enums see the `ResourceType` example data in the module `System.Hatrace.Types`.
+For handling C enums see the `RLimitType` example data in the module `System.Hatrace.Types`.
 
 ## Implementation checklist
 
