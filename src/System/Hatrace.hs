@@ -1836,6 +1836,66 @@ instance SyscallExitFormatting SyscallExitDetails_lseek where
     (syscallEnterToFormatted enterDetail, formatReturn resultingOffset)
 
 
+data SyscallEnterDetails_dup = SyscallEnterDetails_dup
+  { oldfd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_dup where
+  syscallEnterToFormatted SyscallEnterDetails_dup{ oldfd } =
+    FormattedSyscall "dup" [formatArg oldfd]
+
+
+data SyscallExitDetails_dup = SyscallExitDetails_dup
+  { enterDetail :: SyscallEnterDetails_dup
+  , newfd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_dup where
+  syscallExitToFormatted SyscallExitDetails_dup{ enterDetail, newfd } =
+    (syscallEnterToFormatted enterDetail, formatReturn newfd)
+
+
+data SyscallEnterDetails_dup2 = SyscallEnterDetails_dup2
+  { oldfd :: CInt
+  , newfd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_dup2 where
+  syscallEnterToFormatted SyscallEnterDetails_dup2{ oldfd, newfd } =
+    FormattedSyscall "dup2" [formatArg oldfd, formatArg newfd]
+
+
+data SyscallExitDetails_dup2 = SyscallExitDetails_dup2
+  { enterDetail :: SyscallEnterDetails_dup2
+  , newfd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_dup2 where
+  syscallExitToFormatted SyscallExitDetails_dup2{ enterDetail, newfd } =
+    (syscallEnterToFormatted enterDetail, formatReturn newfd)
+
+
+data SyscallEnterDetails_dup3 = SyscallEnterDetails_dup3
+  { oldfd :: CInt
+  , newfd :: CInt
+  , flags :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_dup3 where
+  syscallEnterToFormatted SyscallEnterDetails_dup3{ oldfd, newfd, flags } =
+    FormattedSyscall "dup3" [formatArg oldfd, formatArg newfd, formatArg flags]
+
+
+data SyscallExitDetails_dup3 = SyscallExitDetails_dup3
+  { enterDetail :: SyscallEnterDetails_dup3
+  , newfd :: CInt
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_dup3 where
+  syscallExitToFormatted SyscallExitDetails_dup3{ enterDetail, newfd } =
+    (syscallEnterToFormatted enterDetail, formatReturn newfd)
+
+
 data DetailedSyscallEnter
   = DetailedSyscallEnter_open SyscallEnterDetails_open
   | DetailedSyscallEnter_openat SyscallEnterDetails_openat
@@ -1895,6 +1955,9 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_mkdirat SyscallEnterDetails_mkdirat
   | DetailedSyscallEnter_rmdir SyscallEnterDetails_rmdir
   | DetailedSyscallEnter_lseek SyscallEnterDetails_lseek
+  | DetailedSyscallEnter_dup SyscallEnterDetails_dup
+  | DetailedSyscallEnter_dup2 SyscallEnterDetails_dup2
+  | DetailedSyscallEnter_dup3 SyscallEnterDetails_dup3
   | DetailedSyscallEnter_unimplemented Syscall SyscallArgs
   deriving (Eq, Ord, Show)
 
@@ -1958,6 +2021,9 @@ data DetailedSyscallExit
   | DetailedSyscallExit_mkdirat SyscallExitDetails_mkdirat
   | DetailedSyscallExit_rmdir SyscallExitDetails_rmdir
   | DetailedSyscallExit_lseek SyscallExitDetails_lseek
+  | DetailedSyscallExit_dup SyscallExitDetails_dup
+  | DetailedSyscallExit_dup2 SyscallExitDetails_dup2
+  | DetailedSyscallExit_dup3 SyscallExitDetails_dup3
   | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
   deriving (Eq, Ord, Show)
 
@@ -2549,6 +2615,24 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , whence = fromIntegral whence
       , seekWhence = fromCInt (fromIntegral whence)
       }
+  Syscall_dup -> do
+    let SyscallArgs{ arg0 = oldfd } = syscallArgs
+    pure $ DetailedSyscallEnter_dup $ SyscallEnterDetails_dup
+      { oldfd = fromIntegral oldfd
+      }
+  Syscall_dup2 -> do
+    let SyscallArgs{ arg0 = oldfd, arg1 = newfd } = syscallArgs
+    pure $ DetailedSyscallEnter_dup2 $ SyscallEnterDetails_dup2
+      { oldfd = fromIntegral oldfd
+      , newfd = fromIntegral newfd
+      }
+  Syscall_dup3 -> do
+    let SyscallArgs{ arg0 = oldfd, arg1 = newfd, arg2 = flags } = syscallArgs
+    pure $ DetailedSyscallEnter_dup3 $ SyscallEnterDetails_dup3
+      { oldfd = fromIntegral oldfd
+      , newfd = fromIntegral newfd
+      , flags = fromIntegral flags
+      }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 
 getRawSyscallExitDetails :: KnownSyscall -> SyscallArgs -> CPid -> IO (Either ERRNO DetailedSyscallExit)
@@ -2905,6 +2989,21 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_lseek{} -> do
         pure $ DetailedSyscallExit_lseek $
           SyscallExitDetails_lseek { enterDetail, resultingOffset = fromIntegral result }
+
+    DetailedSyscallEnter_dup
+      enterDetail@SyscallEnterDetails_dup{} -> do
+        pure $ DetailedSyscallExit_dup $
+          SyscallExitDetails_dup { enterDetail, newfd = fromIntegral result }
+
+    DetailedSyscallEnter_dup2
+      enterDetail@SyscallEnterDetails_dup2{} -> do
+        pure $ DetailedSyscallExit_dup2 $
+          SyscallExitDetails_dup2 { enterDetail, newfd = fromIntegral result }
+
+    DetailedSyscallEnter_dup3
+      enterDetail@SyscallEnterDetails_dup3{} -> do
+        pure $ DetailedSyscallExit_dup3 $
+          SyscallExitDetails_dup3 { enterDetail, newfd = fromIntegral result }
 
     DetailedSyscallEnter_unimplemented syscall syscallArgs ->
       pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
@@ -3414,6 +3513,12 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_lseek details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_dup details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_dup2 details -> syscallEnterToFormatted details
+
+        DetailedSyscallEnter_dup3 details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
           FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
                            (unimplementedArgs unimplementedSyscallArgs)
@@ -3568,6 +3673,12 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_rmdir details -> formatDetails details
 
     DetailedSyscallExit_lseek details -> formatDetails details
+
+    DetailedSyscallExit_dup details -> formatDetails details
+
+    DetailedSyscallExit_dup2 details -> formatDetails details
+
+    DetailedSyscallExit_dup3 details -> formatDetails details
 
     DetailedSyscallExit_unimplemented syscall syscallArgs result ->
       handleUnimplemented syscall syscallArgs result
