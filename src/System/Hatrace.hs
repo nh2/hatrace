@@ -210,7 +210,7 @@ import           System.Linux.Ptrace.X86Regs (X86Regs(..))
 import           System.Posix.Files (readSymbolicLink)
 import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
-import           System.Posix.Types (CPid(..), CMode(..), CUid(..), CGid(..))
+import           System.Posix.Types (CPid(..), CMode(..), CUid(..), CGid(..), COff(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..), Flag(..))
 import           UnliftIO.Concurrent (runInBoundThread)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
@@ -1816,8 +1816,8 @@ instance SyscallExitFormatting SyscallExitDetails_rmdir where
 
 data SyscallEnterDetails_lseek = SyscallEnterDetails_lseek
   { fd :: CInt
-  , offset :: CSize
-  , whence :: CInt
+  , offset :: COff
+  , whence :: SeekWhence
   } deriving (Eq, Ord, Show)
 
 instance SyscallEnterFormatting SyscallEnterDetails_lseek where
@@ -1826,7 +1826,7 @@ instance SyscallEnterFormatting SyscallEnterDetails_lseek where
 
 data SyscallExitDetails_lseek = SyscallExitDetails_lseek
   { enterDetail :: SyscallEnterDetails_lseek
-  , offset :: CInt
+  , offset :: COff
   } deriving (Eq, Ord, Show)
 
 instance SyscallExitFormatting SyscallExitDetails_lseek where
@@ -2544,7 +2544,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
     pure $ DetailedSyscallEnter_lseek $ SyscallEnterDetails_lseek
       { fd = fromIntegral fd'
       , offset = fromIntegral offset'
-      , whence = fromIntegral whence'
+      , whence = fromCInt (fromIntegral whence')
       }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 

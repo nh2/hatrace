@@ -59,6 +59,8 @@ module System.Hatrace.Types
   , RLimitType(..)
   , ResourceType(..)
   , RLimitStruct(..)
+  , SeekWhence(..)
+  , SeekWhenceKnown(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -1728,4 +1730,21 @@ $(deriveEnumTypeClasses ''RLimitType
   , ('ResourceNice, (#const RLIMIT_NICE), "RLIMIT_NICE")
   , ('ResourceRTPrio, (#const RLIMIT_RTPRIO), "RLIMIT_RTPRIO")
   , ('ResourceRTTime, (#const RLIMIT_RTTIME), "RLIMIT_RTTIME")
+  ])
+
+data SeekWhence
+  = SeekWhenceKnown SeekWhenceKnown
+  | SeekWhenceUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data SeekWhenceKnown
+  = SeekSet -- ^ The file offset is set to offset bytes.
+  | SeekCur -- ^ The file offset is set to its current location plus offset bytes.
+  | SeekEnd -- ^ The file offset is set to the  size  of  the  file  plus offset bytes.
+  deriving (Eq, Ord, Show)
+
+$(deriveEnumTypeClasses ''SeekWhence
+  [ ('SeekSet, (#const SEEK_SET), "SEEK_SET")
+  , ('SeekCur, (#const SEEK_CUR), "SEEK_CUR")
+  , ('SeekEnd, (#const SEEK_END), "SEEK_END")
   ])
