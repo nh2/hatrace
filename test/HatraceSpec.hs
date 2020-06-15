@@ -650,12 +650,14 @@ spec = before_ assertNoChildren $ do
         pipeEvents `shouldSatisfy` (not . null)
 
     describe "dup" $ do
-       it "Syscall_dup2 is identified" $ do
-         argv <- procToArgv "sh" ["-c", "echo 'foo' | cat"]
+       it "dup2 identified when a shell pipe gets used" $ do
+         argv <- procToArgv "sh" ["-c", "echo 'foo' > /dev/null"]
          (exitCode, events) <- sourceRawTraceForkExecvFullPathWithSink argv CL.consume
 
          let syscalls = [ syscall | (_pid, SyscallStop SyscallEnter (syscall, _args)) <- events ]
          exitCode `shouldBe` ExitSuccess
+         -- It may be possible a non standard unix shell uses dup3 or another interface,
+         -- in that case, this test needs to use a manual implementation.
          syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_dup2 `elem` xs)
 
     describe "access" $ do
