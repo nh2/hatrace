@@ -1738,14 +1738,25 @@ data SeekWhence
   deriving (Eq, Ord, Show)
 
 data SeekWhenceKnown
-  = SeekSet -- ^ The file offset is set to offset bytes.
-  | SeekCur -- ^ The file offset is set to its current location plus offset bytes.
-  | SeekEnd -- ^ The file offset is set to the  size  of  the  file  plus offset bytes.
+  = SeekSet
+    -- ^ The file offset is set to offset bytes.
+  | SeekCur
+    -- ^ The file offset is set to its current location plus offset bytes.
+  | SeekEnd
+    -- ^ The file offset is set to the  size  of  the  file  plus offset bytes.
 #ifdef SEEK_DATA
   | SeekData
+    -- ^ Adjust  the file offset to the next location in the file greater than
+    -- or equal to offset containing data.  If offset points to data, then the
+    -- file offset is set to offset.
 #endif
 #ifdef SEEK_HOLE
   | SeekHole
+    -- ^ Adjust the file offset to the next hole in the file greater than or
+    -- equal to offset. If offset points into the middle of a hole, then the
+    -- file offset is set to offset. If there is no hole past offset, then the
+    -- file offset is adjusted to the end of the file (i.e., there is an
+    -- implicit hole at the end of any file).
 #endif
   deriving (Eq, Ord, Show)
 
