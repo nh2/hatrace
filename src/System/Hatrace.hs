@@ -1948,11 +1948,13 @@ data SyscallEnterDetails_dup3 = SyscallEnterDetails_dup3
   { oldfd :: CInt
   , newfd :: CInt
   , flags :: CInt
+  -- Peeked details
+  , dupFlags :: DupFlags
   } deriving (Eq, Ord, Show)
 
 instance SyscallEnterFormatting SyscallEnterDetails_dup3 where
-  syscallEnterToFormatted SyscallEnterDetails_dup3{ oldfd, newfd, flags } =
-    FormattedSyscall "dup3" [formatArg oldfd, formatArg newfd, formatArg flags]
+  syscallEnterToFormatted SyscallEnterDetails_dup3{ oldfd, newfd, dupFlags } =
+    FormattedSyscall "dup3" [formatArg oldfd, formatArg newfd, formatArg dupFlags]
 
 
 data SyscallExitDetails_dup3 = SyscallExitDetails_dup3
@@ -2728,6 +2730,7 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       { oldfd = fromIntegral oldfd
       , newfd = fromIntegral newfd
       , flags = fromIntegral flags
+      , dupFlags = fromCInt (fromIntegral flags)
       }
   _ -> pure $ DetailedSyscallEnter_unimplemented (KnownSyscall syscall) syscallArgs
 

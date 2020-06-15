@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -61,6 +62,8 @@ module System.Hatrace.Types
   , RLimitStruct(..)
   , SeekWhence(..)
   , SeekWhenceKnown(..)
+  , DupFlags(..)
+  , DupFlagsKnown(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -1770,4 +1773,17 @@ $(deriveEnumTypeClasses ''SeekWhence
 #ifdef SEEK_HOLE
   , ('SeekHole, (#const SEEK_HOLE), "SEEK_HOLE")
 #endif
+  ])
+
+data DupFlags
+  = DupFlagsKnown DupFlagsKnown
+  | DupFlagsUnknown CInt
+  deriving (Eq, Ord, Show)
+
+data DupFlagsKnown
+  = DupCloseOnExec
+  deriving (Eq, Ord, Show)
+
+$(deriveEnumTypeClasses ''DupFlags
+  [ ('DupCloseOnExec, (#const O_CLOEXEC), "O_CLOEXEC")
   ])
