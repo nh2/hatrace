@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
   }
   int retval = ftruncate(fd, size);
   if (retval != 0) {
-    fprintf(stderr, "could not truncate file %s to %d\n", filename, size);
+    perror("could not truncate file\n");
   }
   close(fd);
 

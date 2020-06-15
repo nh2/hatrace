@@ -16,7 +16,7 @@ int main(int argc, char* argv[]) {
   int size = atoi(argv[2]);
   int retval = truncate(filename, size);
   if (retval != 0) {
-    fprintf(stderr, "could not truncate file %s to %d\n", filename, size);
+    perror("could not truncate file\n");
   }
 
   return retval;

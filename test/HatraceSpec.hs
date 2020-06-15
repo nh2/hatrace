@@ -1256,7 +1256,7 @@ spec = before_ assertNoChildren $ do
                 ) <- events
                 , pathBS == T.encodeUtf8 (T.pack tmpFile)
               ]
-        tmpFileTruncateEvents `shouldSatisfy` ((== 1) . length)
+        length tmpFileTruncateEvents `shouldBe` 1
 
     describe "ftruncate" $
       it "occurs when we ftruncate a file" $ do
@@ -1268,11 +1268,11 @@ spec = before_ assertNoChildren $ do
           sourceTraceForkExecvFullPathWithSink argv $
             syscallExitDetailsOnlyConduit .| CL.consume
         exitCode `shouldBe` ExitSuccess
-        let tmpFilefFtruncateEvents =
+        let tmpFileFtruncateEvents =
               [ ()
               | (_pid
                 , Right (DetailedSyscallExit_ftruncate _)
                 ) <- events
               ]
-        tmpFilefFtruncateEvents `shouldSatisfy` ((== 1) . length)
+        length tmpFileFtruncateEvents `shouldBe` 1
 
