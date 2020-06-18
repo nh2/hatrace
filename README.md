@@ -28,11 +28,16 @@ Includes:
   * Add "magic" support for new file systems without modifying existing programs (like [this paper](https://www.usenix.org/legacy/events/expcs07/papers/22-spillane.pdf) shows).
   * Add logging capabilities to programs that were designed without.
 
-## Install
+## Building / Installing
 
-* Clone `git clone https://github.com/nh2/hatrace && cd hatrace`
-* Get submodules `git submodule init && git submodule update`
-* Install with Cabal: `cabal install`
+* Clone: `git clone --recursive https://github.com/nh2/hatrace && cd hatrace`
+* After fetching new changes, update submodules with: `git submodule init && git submodule update --init --recursive`
+* Building for development:
+  * With [Stack](https://docs.haskellstack.org/en/stable/README/): `stack build` or even better `stack test`
+  * With [Cabal](https://www.haskell.org/cabal/): `cabal build` or even better `cabal test`
+* Installing:
+  * With Stack: `stack install`
+  * With Cabal: `cabal install`
 
 ## Work in progress
 
