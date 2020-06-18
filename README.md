@@ -28,6 +28,12 @@ Includes:
   * Add "magic" support for new file systems without modifying existing programs (like [this paper](https://www.usenix.org/legacy/events/expcs07/papers/22-spillane.pdf) shows).
   * Add logging capabilities to programs that were designed without.
 
+## Install
+
+* Clone `git clone https://github.com/nh2/hatrace && cd hatrace`
+* Get submodules `git submodule init && git submodule update`
+* Install with Cabal: `cabal install`
+
 ## Work in progress
 
 This software is work in progress.
