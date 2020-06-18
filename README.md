@@ -10,7 +10,7 @@ Includes:
 ## Use cases
 
 * **General**
-  * Get all syscalls in a list and process them programatically.
+  * Get all syscalls in a list and process them programmatically.
   * Audit high-assurance software systems.
   * Debug difficult bugs that occur only in certain rare situations.
   * Change the results of system calls as seen by the traced program.
@@ -19,7 +19,7 @@ Includes:
   * Kill your build tool at the 3rd `write()` syscall to an `.o` file, checking whether it will recover from that in the next run.
 * **Testing**
   * Write test suites that assert how your code uses system calls, for correctness or performance.
-  * Mock syscalls to test how your program would behave in situations that are difficult to create in the real world, for example [veryfing fault-tolerance in specific scenarios](https://tgrez.github.io/posts/2019-09-04-simulate-network-failures.html)
+  * Mock syscalls to test how your program would behave in situations that are difficult to create in the real world, for example [verifying fault-tolerance in specific scenarios](https://tgrez.github.io/posts/2019-09-04-simulate-network-failures.html)
   * Implement anomaly test suites [like `sqlite` does](https://www.sqlite.org/testing.html#i_o_error_testing), exhaustively testing whether your program can recover from a crash in _any_ syscall.
 * **Fuzzing**
   * Insert garbage data into the program by changing syscall results or directly changing its memory contents.
@@ -43,12 +43,12 @@ The `hatrace` executable is extremely basic and can't do much.
 While syscall names are automatically generated, detail data needs to be implemented by hand and is done for only a few so far.
 Help to add more is appreciated.
 
-However, the Haskell API to write scripts can already do a log. Take a look at the test suite for examples.
+However, the Haskell API to write scripts can already do a lot. Take a look at the test suite for examples.
 
 ### TODO list for contributors
 
 If you find any of the below topics interesting give it a shot!
-It is recommended to file an issue when picking up one of the tasks to coordinate against doing duplicate work.
+It is recommended to file an issue when picking up one of the tasks to coordinate and avoid doing duplicate work.
 
 * [ ] Implement all the syscalls
 * [X] Remembering syscall arguments in a PID/TID map
