@@ -130,7 +130,7 @@ main = do
       exitWith exitCode
     FilterMode FilterIntheritedFlocks -> do
       argv <- procToArgv cliProgram cliArgs
-      res <- sourceRawTraceForkExecvFullPathWithSink argv inheritedFlocksSink
+      res <- sourceTraceForkExecvFullPathWithSink argv inheritedFlocksSink
       print res
 
 maybeNonatomicOrBad :: FilePath -> FileWriteBehavior -> Maybe (Either FilePath (FilePath, String))
