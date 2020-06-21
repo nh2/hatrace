@@ -140,6 +140,7 @@ module System.Hatrace
   , SyscallExitDetails_rmdir(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
+  , CPid -- reexport
   , ERRNO(..)
   , foreignErrnoToERRNO
   , getSyscallEnterDetails
@@ -152,7 +153,6 @@ module System.Hatrace
   , fileWritesConduit
   , FileWriteBehavior(..)
   , atomicWritesSink
-  , inheritedFlocksSink
   , SyscallStopType(..)
   , TraceEvent(..)
   , TraceState(..)
@@ -3165,19 +3165,6 @@ atomicWritesSink =
     analyzeWrites' (src, es) = case analyzeWrites es of
       AtomicWrite target -> Right (target, src)
       other -> Left (src, other)
-
-inheritedFlocksSink ::
-     (MonadIO m)
-  => ConduitT (CPid, TraceEvent (Syscall, SyscallArgs)) Void m ()
-inheritedFlocksSink = do
-  -- extract <$> (fileWritesConduit .| foldlC collectWrite Map.empty)
-  let loop = do
-        await >>= \case
-          Just x -> do
-            liftIO $ print x
-            loop
-          Nothing -> return ()
-  loop
 
 data HatraceEvent = HatraceEvent CPid EventDetails
   deriving (Eq, Ord, Show)

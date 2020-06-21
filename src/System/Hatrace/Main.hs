@@ -19,6 +19,7 @@ import           System.FilePath (splitPath)
 
 import           System.Hatrace
 import           System.Hatrace.Format
+import           System.Hatrace.Tools
 
 data Filter
   = FilterAtomicWrites

@@ -34,6 +34,7 @@ library
                        System.Hatrace.SyscallTables
                        System.Hatrace.SyscallTables.Generated
                        System.Hatrace.SyscallTables.Util
+                       System.Hatrace.Tools
                        System.Hatrace.Types
                        System.Hatrace.Types.Internal
                        System.Hatrace.Types.TH
