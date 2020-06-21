@@ -20,8 +20,9 @@ import           System.FilePath (splitPath)
 import           System.Hatrace
 import           System.Hatrace.Format
 
-data Filter =
-  FilterAtomicWrites
+data Filter
+  = FilterAtomicWrites
+  | FilterIntheritedFlocks
   deriving (Eq, Ord, Show)
 
 -- | Command line arguments of this program.
@@ -50,11 +51,15 @@ cliArgsParser = do
 
 modeParser :: Parser RunMode
 modeParser =
-  filterParser Opts.<|> traceParser
+  filterParser Opts.<|> filterInheritedFlocksParser Opts.<|> traceParser
   where
     filterParser = flag' (FilterMode FilterAtomicWrites)
                    ( long "find-nonatomic-writes"
                    <> help "find file writes without a following rename to a persistent location" )
+    filterInheritedFlocksParser =
+      flag' (FilterMode FilterIntheritedFlocks)
+        ( long "find-inherited-flocks"
+        <> help "find flock()s on locks that were inherided forked threads/processes" )
     traceParser = TraceMode <$> (traceJsonParser Opts.<|> traceStdParser)
     traceJsonParser = flag' JsonOutput
                       ( long "json-output"
@@ -122,6 +127,10 @@ main = do
         forM_ bad $ \(p, e) -> do
           putStrLn $ " - " ++ show p ++ ": " ++ e
       exitWith exitCode
+    FilterMode FilterIntheritedFlocks -> do
+      argv <- procToArgv cliProgram cliArgs
+      res <- sourceRawTraceForkExecvFullPathWithSink argv inheritedFlocksSink
+      print res
 
 maybeNonatomicOrBad :: FilePath -> FileWriteBehavior -> Maybe (Either FilePath (FilePath, String))
 maybeNonatomicOrBad _ NoWrites = Nothing
