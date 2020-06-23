@@ -662,6 +662,32 @@ spec = before_ assertNoChildren $ do
          -- in that case, this test needs to use a manual implementation.
          syscalls `shouldSatisfy` (\xs -> KnownSyscall Syscall_dup2 `elem` xs)
 
+       it "sees the correct dup3 arguments" $ do
+         let dup3Syscall = "example-programs-build/dup3"
+         callProcess "make" ["--quiet", dup3Syscall]
+         argv <- procToArgv dup3Syscall []
+         (exitCode, events) <-
+           sourceTraceForkExecvFullPathWithSink argv $
+             syscallExitDetailsOnlyConduit .| CL.consume
+         exitCode `shouldBe` ExitSuccess
+         let dup3Arguments =
+               [ enterDetail (exitDetails :: SyscallExitDetails_dup3)
+               | (_pid
+                 , Right (DetailedSyscallExit_dup3 exitDetails)
+                 ) <- events
+               ]
+         let testClosed detail = do
+               let SyscallEnterDetails_dup3 {dupFlags} = detail
+               let (DupFlagsKnown granularDupFlags) = dupFlags
+               (closesOnExec granularDupFlags) `shouldBe` True
+         let testNone detail = do
+               let SyscallEnterDetails_dup3 {dupFlags} = detail
+               let (DupFlagsKnown granularDupFlags) = dupFlags
+               (closesOnExec granularDupFlags) `shouldBe` False
+         testClosed (head dup3Arguments)
+         testNone (last dup3Arguments)
+
+
     describe "access" $ do
       it "seen when invoked in a program" $ do
         let accessItself = "example-programs-build/access-itself"
