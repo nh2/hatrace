@@ -63,7 +63,7 @@ module System.Hatrace.Types
   , SeekWhence(..)
   , SeekWhenceKnown(..)
   , DupFlags(..)
-  , DupFlagsKnown(..)
+  , GranularDupFlags(..)
   ) where
 
 import           Control.Monad (filterM)
@@ -82,7 +82,6 @@ import           System.Hatrace.Signals
 import           System.Hatrace.Types.Internal
 import           System.Hatrace.Types.TH
 import           System.Hatrace.Format
-
 
 class CShortRepresentable a where
   toCShort :: a -> CShort
@@ -1776,14 +1775,40 @@ $(deriveEnumTypeClasses ''SeekWhence
   ])
 
 data DupFlags
-  = DupFlagsKnown DupFlagsKnown
+  = DupFlagsKnown GranularDupFlags
   | DupFlagsUnknown CInt
   deriving (Eq, Ord, Show)
 
-data DupFlagsKnown
-  = DupCloseOnExec
-  deriving (Eq, Ord, Show)
+data GranularDupFlags = GranularDupFlags
+  { closesOnExec :: Bool
+  } deriving (Eq, Ord, Show)
 
-$(deriveEnumTypeClasses ''DupFlags
-  [ ('DupCloseOnExec, (#const O_CLOEXEC), "O_CLOEXEC")
-  ])
+instance ArgFormatting DupFlags where
+  formatArg (DupFlagsKnown flags) =
+    let flagValues = concat
+          [ if closesOnExec flags then ["O_CLOEXEC"] else []
+          ]
+    in if null flagValues then IntegerArg 0 else FixedStringArg (intercalate "|" flagValues)
+  formatArg (DupFlagsUnknown unknown) = IntegerArg (fromIntegral unknown)
+
+instance CIntRepresentable DupFlags where
+  toCInt (DupFlagsKnown flags) =
+    let readFlag field flag = if field flags then flag else 0
+        allFlags =
+          [ (closesOnExec, (#const O_CLOEXEC))
+          ]
+    in foldr (.|.) zeroBits $ map (uncurry readFlag) allFlags
+  toCInt (DupFlagsUnknown unknown) = unknown
+  fromCInt flags =
+    let isset f = flags `hasSetBits` f
+        allBitsKnown = foldr (.|.) zeroBits bitsKnown
+        bitsKnown =
+          [ (#const O_CLOEXEC)
+          ]
+        onlyKnown = flags .&. complement allBitsKnown /= zeroBits
+    in if not onlyKnown
+       then DupFlagsKnown $
+            GranularDupFlags
+            { closesOnExec = isset (#const O_CLOEXEC)
+            }
+       else DupFlagsUnknown flags
