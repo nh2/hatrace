@@ -1772,32 +1772,6 @@ data GranularDupFlags = GranularDupFlags
   { closesOnExec :: Bool
   } deriving (Eq, Ord, Show)
 
-instance ArgFormatting DupFlags where
-  formatArg (DupFlagsKnown flags) =
-    let flagValues = concat
-          [ if closesOnExec flags then ["O_CLOEXEC"] else []
-          ]
-    in if null flagValues then IntegerArg 0 else FixedStringArg (intercalate "|" flagValues)
-  formatArg (DupFlagsUnknown unknown) = IntegerArg (fromIntegral unknown)
-
-instance CIntRepresentable DupFlags where
-  toCInt (DupFlagsKnown flags) =
-    let readFlag field flag = if field flags then flag else 0
-        allFlags =
-          [ (closesOnExec, (#const O_CLOEXEC))
-          ]
-    in foldr (.|.) zeroBits $ map (uncurry readFlag) allFlags
-  toCInt (DupFlagsUnknown unknown) = unknown
-  fromCInt flags =
-    let isset f = flags `hasSetBits` f
-        allBitsKnown = foldr (.|.) zeroBits bitsKnown
-        bitsKnown =
-          [ (#const O_CLOEXEC)
-          ]
-        onlyKnown = flags .&. complement allBitsKnown /= zeroBits
-    in if not onlyKnown
-       then DupFlagsKnown $
-            GranularDupFlags
-            { closesOnExec = isset (#const O_CLOEXEC)
-            }
-       else DupFlagsUnknown flags
+$(deriveFlagsTypeClasses ''DupFlags "0"
+   [ ('closesOnExec, (#const O_CLOEXEC), "O_CLOEXEC")
+   ])
