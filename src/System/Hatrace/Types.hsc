@@ -10,6 +10,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -22,6 +23,7 @@
 
 module System.Hatrace.Types
   ( FileAccessMode(..)
+  , FlockOperation(..)
   , GranularAccessMode(..)
   , MemoryProtectMode(..)
   , GranularMemoryProtectMode(..)
@@ -123,6 +125,38 @@ $(deriveFlagsCIntRepresentable ''FileAccessMode
   , ('accessModeWrite, (#const W_OK))
   , ('accessModeExecute, (#const X_OK))
   ])
+
+data FlockOperation
+  = FlockShared Bool -- ^ nonblocking?
+  | FlockExclusive Bool -- ^ nonblocking?
+  | FlockUnlock
+  | FlockUnknown CInt
+  deriving (Eq, Ord, Show)
+
+instance CIntRepresentable FlockOperation where
+  toCInt (FlockShared False) = (#const LOCK_SH)
+  toCInt (FlockShared True) = (#const LOCK_SH) .|. (#const LOCK_NB)
+  toCInt (FlockExclusive False) = (#const LOCK_EX)
+  toCInt (FlockExclusive True) = (#const LOCK_EX) .|. (#const LOCK_NB)
+  toCInt FlockUnlock = (#const LOCK_UN)
+  toCInt (FlockUnknown x) = x
+
+  fromCInt x
+    | x == (#const LOCK_SH)                      = FlockShared False
+    | x == (#const LOCK_SH) .|. (#const LOCK_NB) = FlockShared True
+    | x == (#const LOCK_EX)                      = FlockExclusive False
+    | x == (#const LOCK_EX) .|. (#const LOCK_NB) = FlockExclusive True
+    | x == (#const LOCK_UN)                      = FlockUnlock
+    | otherwise                                  = FlockUnknown x
+
+instance ArgFormatting FlockOperation where
+  formatArg (FlockShared False) = FixedStringArg "LOCK_SH"
+  formatArg (FlockShared True) = FixedStringArg "LOCK_SH | LOCK_NB"
+  formatArg (FlockExclusive False) = FixedStringArg "LOCK_EX"
+  formatArg (FlockExclusive True) = FixedStringArg "LOCK_EX | LOCK_NB"
+  formatArg FlockUnlock = FixedStringArg "LOCK_UN"
+  formatArg (FlockUnknown unknown) =
+    IntegerArg (fromIntegral unknown)
 
 data MemoryProtectMode
   = MemoryProtectKnown GranularMemoryProtectMode

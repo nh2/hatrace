@@ -18,6 +18,8 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/execve-linux-null-envp
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/atomic-write
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/write-EBADF
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/change-write-result
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/flock
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/inherited-flocks
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/mmap-syscall
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/access-itself
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/sockets
@@ -82,3 +84,7 @@ $(EXAMPLE_DST)/%: $(EXAMPLE_SRC)/%-gnu.c
 example-programs-build/mmap-syscall: example-programs/mmap-syscall.c
 	mkdir -p example-programs-build
 	gcc -static -std=c99 -Wall -Werror example-programs/mmap-syscall.c -o example-programs-build/mmap-syscall
+
+example-programs-build/inherited-flocks: example-programs/inherited-flocks.c
+	mkdir -p example-programs-build
+	gcc -static -std=c99 -Wall -Werror -pthread example-programs/inherited-flocks.c -o example-programs-build/inherited-flocks

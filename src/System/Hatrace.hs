@@ -40,6 +40,8 @@ module System.Hatrace
   , SyscallExitDetails_access(..)
   , SyscallEnterDetails_faccessat(..)
   , SyscallExitDetails_faccessat(..)
+  , SyscallEnterDetails_flock(..)
+  , SyscallExitDetails_flock(..)
   , SyscallEnterDetails_write(..)
   , SyscallExitDetails_write(..)
   , SyscallEnterDetails_read(..)
@@ -152,9 +154,14 @@ module System.Hatrace
   , SyscallExitDetails_dup3(..)
   , DetailedSyscallEnter(..)
   , DetailedSyscallExit(..)
+  , EnterDetails(..)
+  , enterDetailsToSyscall
+  , ExitDetails(..)
+  , getExitedSyscallResult
   , ERRNO(..)
   , foreignErrnoToERRNO
   , getSyscallEnterDetails
+  , getSyscallExitDetails
   , setExitedSyscallResult
   , syscallEnterDetailsOnlyConduit
   , syscallRawEnterDetailsOnlyConduit
@@ -173,8 +180,15 @@ module System.Hatrace
   , doesProcessHaveChildren
   , getFdPath
   , getExePath
+  -- * Simplified API that looks arguments only at syscall enter time
+  , HatraceEvent(..)
+  , EventDetails(..)
+  , EventSyscallEnterDetails(..)
+  , EventSyscallExitDetails(..)
+  , ReturnOrErrno(..)
   -- * Re-exports
   , KnownSyscall(..)
+  , CPid
   ) where
 
 import           Conduit (concatMapC, foldlC)
@@ -879,6 +893,29 @@ data SyscallExitDetails_faccessat = SyscallExitDetails_faccessat
 
 instance SyscallExitFormatting SyscallExitDetails_faccessat where
   syscallExitToFormatted SyscallExitDetails_faccessat{ enterDetail } =
+    (syscallEnterToFormatted enterDetail, NoReturn)
+
+
+data SyscallEnterDetails_flock = SyscallEnterDetails_flock
+  { fd :: CInt
+  , operation :: CInt
+  -- Peeked details
+  , flockOperation :: FlockOperation
+  } deriving (Eq, Ord, Show)
+
+instance SyscallEnterFormatting SyscallEnterDetails_flock where
+  syscallEnterToFormatted SyscallEnterDetails_flock{ fd, operation, flockOperation } =
+    FormattedSyscall "flock" [ formatArg fd, formatArg operation
+                             , formatArg flockOperation
+                             ]
+
+
+data SyscallExitDetails_flock = SyscallExitDetails_flock
+  { enterDetail :: SyscallEnterDetails_flock
+  } deriving (Eq, Ord, Show)
+
+instance SyscallExitFormatting SyscallExitDetails_flock where
+  syscallExitToFormatted SyscallExitDetails_flock{ enterDetail } =
     (syscallEnterToFormatted enterDetail, NoReturn)
 
 
@@ -1982,6 +2019,7 @@ data DetailedSyscallEnter
   | DetailedSyscallEnter_pipe2 SyscallEnterDetails_pipe2
   | DetailedSyscallEnter_access SyscallEnterDetails_access
   | DetailedSyscallEnter_faccessat SyscallEnterDetails_faccessat
+  | DetailedSyscallEnter_flock SyscallEnterDetails_flock
   | DetailedSyscallEnter_write SyscallEnterDetails_write
   | DetailedSyscallEnter_read SyscallEnterDetails_read
   | DetailedSyscallEnter_execve SyscallEnterDetails_execve
@@ -2051,6 +2089,7 @@ data DetailedSyscallExit
   | DetailedSyscallExit_pipe2 SyscallExitDetails_pipe2
   | DetailedSyscallExit_access SyscallExitDetails_access
   | DetailedSyscallExit_faccessat SyscallExitDetails_faccessat
+  | DetailedSyscallExit_flock SyscallExitDetails_flock
   | DetailedSyscallExit_write SyscallExitDetails_write
   | DetailedSyscallExit_read SyscallExitDetails_read
   | DetailedSyscallExit_execve SyscallExitDetails_execve
@@ -2211,6 +2250,13 @@ getSyscallEnterDetails syscall syscallArgs pid = let proc = TracedProcess pid in
       , accessMode = fromCInt (fromIntegral mode)
       , pathnameBS
       , flags = fromIntegral flags
+      }
+  Syscall_flock -> do
+    let SyscallArgs{ arg0 = fd, arg1 = operation } = syscallArgs
+    pure $ DetailedSyscallEnter_flock $ SyscallEnterDetails_flock
+      { fd = fromIntegral fd
+      , operation = fromIntegral operation
+      , flockOperation = fromCInt (fromIntegral operation)
       }
   Syscall_write -> do
     let SyscallArgs{ arg0 = fd, arg1 = bufAddr, arg2 = count } = syscallArgs
@@ -2813,6 +2859,11 @@ getSyscallExitDetails detailedSyscallEnter result pid =
       enterDetail@SyscallEnterDetails_faccessat{} -> do
         pure $ DetailedSyscallExit_faccessat $
           SyscallExitDetails_faccessat{ enterDetail }
+
+    DetailedSyscallEnter_flock
+      enterDetail@SyscallEnterDetails_flock{} -> do
+        pure $ DetailedSyscallExit_flock $
+          SyscallExitDetails_flock{ enterDetail }
 
     DetailedSyscallEnter_read
       enterDetail@SyscallEnterDetails_read{ buf } -> do
@@ -3533,6 +3584,8 @@ formatSyscallEnter enterDetails =
 
         DetailedSyscallEnter_faccessat details -> syscallEnterToFormatted details
 
+        DetailedSyscallEnter_flock details -> syscallEnterToFormatted details
+
         DetailedSyscallEnter_write details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_read details -> syscallEnterToFormatted details
@@ -3700,6 +3753,8 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
     DetailedSyscallExit_access details -> formatDetails details
 
     DetailedSyscallExit_faccessat details -> formatDetails details
+
+    DetailedSyscallExit_flock details -> formatDetails details
 
     DetailedSyscallExit_write details -> formatDetails details
 

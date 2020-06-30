@@ -1,6 +1,6 @@
 packages: .
 
-# Keep deps in sync with `stack.yaml`.
+-- Keep deps in sync with `stack.yaml`.
 
 source-repository-package
     type: git
