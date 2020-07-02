@@ -35,6 +35,7 @@ Includes:
 * Building for development:
   * With [Stack](https://docs.haskellstack.org/en/stable/README/): `stack build` or even better `stack test`
   * With [Cabal](https://www.haskell.org/cabal/): `cabal build` or even better `cabal test`
+  * Use a _recent_ version of these tools, e.g. at least Stack >= 2.
 * Installing:
   * With Stack: `stack install`
   * With Cabal: `cabal install`
