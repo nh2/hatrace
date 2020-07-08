@@ -452,6 +452,26 @@ spec = before_ assertNoChildren $ do
         let access = FileAccessKnown (GranularAccessMode r w e)
         in fromCInt (toCInt access) == access
 
+  describe "memory management " $ do
+
+    it "peekable trace source catches peeking error on enter" $ do
+        let testProgram = "example-programs-build/bad-open-pointer"
+        callProcess "make" ["--quiet", testProgram]
+        -- wrapping into shell to mute the output
+        argv <- procToArgv "sh" ["-c", testProgram ++ " >/dev/null"]
+        (exitCode, ()) <-
+          sourceTraceForkExecvFullPathWithSink argv CL.sinkNull
+        exitCode `shouldBe` ExitSuccess
+
+
+    it "traceForkProcess is able to catch errors on exits" $ do
+        let testProgram = "example-programs-build/bad-read-pointer"
+        callProcess "make" ["--quiet", testProgram]
+        -- wrapping into shell to mute the output
+        (program:args) <- procToArgv "sh" ["-c", testProgram ++ " >/dev/null"]
+        exitCode <- traceForkProcess program args (\_ -> pure ())
+        exitCode `shouldBe` ExitSuccess
+
   describe "per-syscall tests" $ do
 
     describe "read" $ do
