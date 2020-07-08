@@ -38,6 +38,8 @@ EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/getcwd
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/truncate
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/ftruncate
 EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/dup3
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/bad-open-pointer
+EXAMPLE_PROGRAMS += $(EXAMPLE_DST)/bad-read-pointer
 
 .PHONY: example-programs
 example-programs: $(EXAMPLE_PROGRAMS)
