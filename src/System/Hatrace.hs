@@ -207,6 +207,7 @@ import qualified Foreign.Marshal.Array (peekArray)
 import           Foreign.Marshal.Utils (withMany)
 import           Foreign.Ptr (castPtr, Ptr, nullPtr, wordPtrToPtr)
 import           Foreign.Storable (Storable, peekByteOff, sizeOf)
+import           GHC.IO.Exception (IOErrorType(HardwareFault))
 import           GHC.Stack (HasCallStack, callStack, getCallStack, prettySrcLoc)
 import           System.Directory (canonicalizePath, doesFileExist, findExecutable)
 import           System.Exit (ExitCode(..), die)
@@ -219,17 +220,19 @@ import qualified System.Linux.Ptrace.Syscall as Ptrace.Syscall
 import           System.Linux.Ptrace.Types (Regs(..))
 import           System.Linux.Ptrace.X86_64Regs (X86_64Regs(..))
 import           System.Linux.Ptrace.X86Regs (X86Regs(..))
+import           System.IO.Error (ioeGetErrorType)
 import           System.Posix.Files (readSymbolicLink)
 import           System.Posix.Internals (withFilePath)
 import           System.Posix.Signals (Signal, sigTRAP, sigSTOP, sigTSTP, sigTTIN, sigTTOU)
 import           System.Posix.Types (CPid(..), CMode(..), CUid(..), CGid(..), COff(..))
 import           System.Posix.Waitpid (waitpid, waitpidFullStatus, Status(..), FullStatus(..), Flag(..))
 import           UnliftIO.Concurrent (runInBoundThread)
+import           UnliftIO.Exception (handle, throwIO)
 import           UnliftIO.IORef (newIORef, writeIORef, readIORef)
 
 import           System.Hatrace.Format
 import           System.Hatrace.Signals (signalMap)
-import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64)
+import           System.Hatrace.SyscallTables.Generated (KnownSyscall(..), syscallMap_i386, syscallMap_x64_64, syscallName)
 import           System.Hatrace.Types
 
 
@@ -1972,6 +1975,14 @@ instance SyscallExitFormatting SyscallExitDetails_dup3 where
   syscallExitToFormatted SyscallExitDetails_dup3{ enterDetail, newfd } =
     (syscallEnterToFormatted enterDetail, formatReturn newfd)
 
+-- Note: [Unpeekable syscalls]
+--
+-- We cannot obtain/print syscall details in all cases, for example when a bad pointer
+-- is given to read()/write(). Instead, we just want to print/return ...
+-- We implement this by RawEnterDetails, RawExitDetails and DetailedSyscallExit_raw
+-- These constructors get used when catching EIO ("HardwareFault") while trying to
+-- peek event details.
+
 
 data DetailedSyscallEnter
   = DetailedSyscallEnter_getcwd SyscallEnterDetails_getcwd
@@ -2107,35 +2118,47 @@ data DetailedSyscallExit
   | DetailedSyscallExit_dup SyscallExitDetails_dup
   | DetailedSyscallExit_dup2 SyscallExitDetails_dup2
   | DetailedSyscallExit_dup3 SyscallExitDetails_dup3
-  | DetailedSyscallExit_unimplemented Syscall SyscallArgs Word64
+  | DetailedSyscallExit_raw Syscall -- ^ See note [Unpeekable syscalls]
+  | DetailedSyscallExit_unimplemented Syscall
   deriving (Eq, Ord, Show)
 
 data EnterDetails
-  = KnownEnterDetails !KnownSyscall DetailedSyscallEnter
+  = KnownEnterDetails !KnownSyscall !SyscallArgs DetailedSyscallEnter
+  | RawEnterDetails !Syscall !SyscallArgs -- ^ See note [Unpeekable syscalls]
   | UnknownEnterDetails !Word64 !SyscallArgs
   deriving (Eq, Ord, Show)
 
 enterDetailsToSyscall :: EnterDetails -> Syscall
 enterDetailsToSyscall details = case details of
-  KnownEnterDetails known _ -> KnownSyscall known
+  KnownEnterDetails known _ _ -> KnownSyscall known
+  RawEnterDetails syscall _ -> syscall
   UnknownEnterDetails unknown _ -> UnknownSyscall unknown
 
 data ExitDetails
   = KnownExitDetails !KnownSyscall DetailedSyscallExit
-  | UnknownExitDetails !Word64 !SyscallArgs
+  | RawExitDetails !Syscall -- ^ See note [Unpeekable syscalls]
+  | UnknownExitDetails !Word64
   deriving (Eq, Ord, Show)
 
 exitDetailsToSyscall :: ExitDetails -> Syscall
 exitDetailsToSyscall details = case details of
   KnownExitDetails known _ -> KnownSyscall known
-  UnknownExitDetails unknown _ -> UnknownSyscall unknown
+  RawExitDetails syscall -> syscall
+  UnknownExitDetails unknown -> UnknownSyscall unknown
 
 getEnterDetails :: CPid -> IO EnterDetails
 getEnterDetails pid = do
   (syscall, syscallArgs) <- getEnteredSyscall pid
-  case syscall of
+  let handleEIO ioErr =
+        -- Foreign.C.Error maps EIO to HardwareFault
+        -- See note [Unpeekable syscalls]
+        if ioeGetErrorType ioErr == HardwareFault
+        then pure $ RawEnterDetails syscall syscallArgs
+        else throwIO ioErr
+  handle handleEIO $ case syscall of
     KnownSyscall knownSyscall ->
-      KnownEnterDetails knownSyscall <$> getSyscallEnterDetails knownSyscall syscallArgs pid
+      KnownEnterDetails knownSyscall syscallArgs <$>
+        getSyscallEnterDetails knownSyscall syscallArgs pid
     UnknownSyscall unknown ->
       pure $ UnknownEnterDetails unknown syscallArgs
 
@@ -3125,8 +3148,8 @@ getSyscallExitDetails detailedSyscallEnter result pid =
         pure $ DetailedSyscallExit_dup3 $
           SyscallExitDetails_dup3 { enterDetail, newfd = fromIntegral result }
 
-    DetailedSyscallEnter_unimplemented syscall syscallArgs ->
-      pure $ DetailedSyscallExit_unimplemented syscall syscallArgs result
+    DetailedSyscallEnter_unimplemented syscall _syscallArgs ->
+      pure $ DetailedSyscallExit_unimplemented syscall
 
 peekArray :: Storable a => TracedProcess -> Int -> Ptr a -> IO [a]
 peekArray pid size ptr
@@ -3160,7 +3183,7 @@ syscallEnterDetailsOnlyConduit ::
      (MonadIO m)
   => ConduitT (CPid, TraceEvent EnterDetails) (CPid, DetailedSyscallEnter) m ()
 syscallEnterDetailsOnlyConduit = concatMapC $ \(pid, event) -> case event of
-  SyscallStop SyscallEnter (KnownEnterDetails _ detailedSyscallEnter) ->
+  SyscallStop SyscallEnter (KnownEnterDetails _ _ detailedSyscallEnter) ->
     Just (pid, detailedSyscallEnter)
   _ -> Nothing -- skip
 
@@ -3193,10 +3216,12 @@ syscallExitDetailsOnlyConduit = awaitForever $ \(pid, event) -> case event of
       Just errno -> return $ Left errno
       Nothing -> do
         detailed <- case enterDetails of
-          KnownEnterDetails _knownSyscall detailedSyscallEnter ->
+          KnownEnterDetails _ _ detailedSyscallEnter ->
             liftIO $ getSyscallExitDetails detailedSyscallEnter result pid
-          UnknownEnterDetails unknown syscallArgs ->
-            return $ DetailedSyscallExit_unimplemented syscall syscallArgs unknown
+          RawEnterDetails _syscall _syscallArgs ->
+            return $ DetailedSyscallExit_raw syscall
+          UnknownEnterDetails _unknown _syscallArgs ->
+            return $ DetailedSyscallExit_unimplemented syscall
         return $ Right detailed
     yield (pid, mapLeft (syscall, ) exitDetailed)
   _ -> return () -- skip
@@ -3514,8 +3539,10 @@ formatSyscallEnter :: EnterDetails -> FormattedSyscall
 formatSyscallEnter enterDetails =
   case enterDetails of
     UnknownEnterDetails number syscallArgs ->
-      FormattedSyscall ("unknown_syscall_" ++ show number) (unimplementedArgs syscallArgs)
-    KnownEnterDetails _knownSyscall detailed ->
+      FormattedSyscall (unknownNamedSyscall number) (unimplementedArgs syscallArgs)
+    RawEnterDetails syscall syscallArgs ->
+      FormattedSyscall (rawNamedSyscall syscall) (unimplementedArgs syscallArgs)
+    KnownEnterDetails _ _ detailed ->
       case detailed of
         DetailedSyscallEnter_getcwd details -> syscallEnterToFormatted details
 
@@ -3647,7 +3674,7 @@ formatSyscallEnter enterDetails =
         DetailedSyscallEnter_dup3 details -> syscallEnterToFormatted details
 
         DetailedSyscallEnter_unimplemented unimplementedSyscall unimplementedSyscallArgs ->
-          FormattedSyscall ("unimplemented_syscall_details(" ++ show unimplementedSyscall ++ ")")
+          FormattedSyscall (unimplementedNamedSyscall unimplementedSyscall)
                            (unimplementedArgs unimplementedSyscallArgs)
 
 unimplementedArgs :: SyscallArgs -> [FormattedArg]
@@ -3660,30 +3687,51 @@ formatSyscallExit enterDetails pid = do
 
   let unknownExit syscallArgs name = definedArgsExit name (unimplementedArgs syscallArgs)
       definedArgsExit name args = do
-        err <- case mbErrno of
+        outcome <-   case mbErrno of
           Nothing -> pure $ ProperReturn NoReturn
           Just errno -> ErrnoResult errno <$> strError errno
-        pure (FormattedSyscall name args, err)
+        pure (FormattedSyscall name args, outcome)
+
+  -- See note [Unpeekable syscalls]
+  let peekErrorHandler syscall syscallArgs ioErr =
+        if ioeGetErrorType ioErr == HardwareFault
+        then do
+          (formatted, outcome) <-
+            definedArgsExit (rawNamedSyscall syscall) (unimplementedArgs syscallArgs)
+          pure (RawExitDetails syscall, formatted, outcome)
+        else throwIO ioErr
 
   case enterDetails of
     UnknownEnterDetails number syscallArgs -> do
       (formatted, outcome) <-
-        unknownExit syscallArgs $ "unknown_syscall(" ++ show number ++ ")"
-      pure (UnknownExitDetails number syscallArgs, formatted, outcome)
+        unknownExit syscallArgs (unknownNamedSyscall number)
+      pure (UnknownExitDetails number, formatted, outcome)
 
-    KnownEnterDetails knownSyscall detailed -> do
-      details <- getSyscallExitDetails detailed result pid
-      let exitDetails = KnownExitDetails knownSyscall details
-      (formatted, outcome) <-
-        formatDetailedSyscallExit details $ \syscall syscallArgs _result ->
-          unknownExit syscallArgs $ "unimplemented_syscall(" ++ show syscall ++ ")"
-      pure (exitDetails, formatted, outcome)
+    RawEnterDetails syscall syscallArgs -> do
+      (formatted, outcome) <- unknownExit syscallArgs (rawNamedSyscall syscall)
+      pure (RawExitDetails syscall, formatted, outcome)
+
+    KnownEnterDetails knownSyscall syscallArgs detailed ->
+      handle (peekErrorHandler (KnownSyscall knownSyscall) syscallArgs)  $ do
+        details <- getSyscallExitDetails detailed result pid
+        let exitDetails = KnownExitDetails knownSyscall details
+        (formatted, outcome) <-
+          formatDetailedSyscallExit details
+            (\syscall ->
+               unknownExit syscallArgs (rawNamedSyscall syscall))
+            (\syscall ->
+               unknownExit syscallArgs (unimplementedNamedSyscall syscall))
+        pure (exitDetails, formatted, outcome)
+
 
 formatDetailedSyscallExit ::
      DetailedSyscallExit
-  -> (Syscall -> SyscallArgs -> Word64 -> IO (FormattedSyscall, ReturnOrErrno))
+  -> (Syscall -> IO (FormattedSyscall, ReturnOrErrno))
+  -- ^ function to format a raw syscall with unpeekable arg(s)
+  -> (Syscall -> IO (FormattedSyscall, ReturnOrErrno))
+  -- ^ function to format an unknown syscall
   -> IO (FormattedSyscall, ReturnOrErrno)
-formatDetailedSyscallExit detailedExit handleUnimplemented =
+formatDetailedSyscallExit detailedExit handleRaw handleUnimplemented =
   case detailedExit of
     DetailedSyscallExit_getcwd details -> formatDetails details
 
@@ -3813,8 +3861,11 @@ formatDetailedSyscallExit detailedExit handleUnimplemented =
 
     DetailedSyscallExit_dup3 details -> formatDetails details
 
-    DetailedSyscallExit_unimplemented syscall syscallArgs result ->
-      handleUnimplemented syscall syscallArgs result
+    DetailedSyscallExit_raw syscall ->
+      handleRaw syscall
+
+    DetailedSyscallExit_unimplemented syscall ->
+      handleUnimplemented syscall
 
   where
     formatDetails :: SyscallExitFormatting a => a -> IO (FormattedSyscall, ReturnOrErrno)
@@ -4107,6 +4158,24 @@ data Syscall
   | UnknownSyscall !Word64
   deriving (Eq, Ord, Show)
 
+
+namedSyscall :: Syscall -> String
+namedSyscall syscall =
+  case syscall of
+    KnownSyscall sc -> syscallName sc
+    UnknownSyscall unknown -> unknownNamedSyscall unknown
+
+unknownNamedSyscall :: Word64 -> String
+unknownNamedSyscall unknown =
+  "unknown syscall(" ++ show unknown ++ ")"
+
+unimplementedNamedSyscall :: Syscall -> String
+unimplementedNamedSyscall syscall =
+  "unimplemented syscall(" ++ namedSyscall syscall ++ ")"
+
+rawNamedSyscall :: Syscall -> String
+rawNamedSyscall syscall =
+  "raw syscall with unpeekable args(" ++ namedSyscall syscall ++ ")"
 
 data SyscallArgs = SyscallArgs
   { arg0 :: !Word64
