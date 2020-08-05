@@ -423,9 +423,15 @@ instance Storable StatStruct where
     st_size <- #{peek struct stat, st_size} p
     st_blksize <- #{peek struct stat, st_blksize} p
     st_blocks <- #{peek struct stat, st_blocks } p
+#ifdef __APPLE__
+    st_atim <- #{peek struct stat, st_atimespec} p
+    st_mtim <- #{peek struct stat, st_mtimespec} p
+    st_ctim <- #{peek struct stat, st_ctimespec} p
+#else
     st_atim <- #{peek struct stat, st_atim} p
     st_mtim <- #{peek struct stat, st_mtim} p
     st_ctim <- #{peek struct stat, st_ctim} p
+#endif
     return StatStruct{..}
   poke p StatStruct{..} = do
     #{poke struct stat, st_dev} p st_dev
@@ -438,9 +444,15 @@ instance Storable StatStruct where
     #{poke struct stat, st_size} p st_size
     #{poke struct stat, st_blksize} p st_blksize
     #{poke struct stat, st_blocks} p st_blocks
+#ifdef __APPLE__
+    #{poke struct stat, st_atimespec} p st_atim
+    #{poke struct stat, st_mtimespec} p st_mtim
+    #{poke struct stat, st_ctimespec} p st_ctim
+#else
     #{poke struct stat, st_atim} p st_atim
     #{poke struct stat, st_mtim} p st_mtim
     #{poke struct stat, st_ctim} p st_ctim
+#endif
 
 -- outputting st_mode and st_size first following strace
 -- which appears to output only those
