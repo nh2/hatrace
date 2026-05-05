@@ -18,6 +18,7 @@ module System.Hatrace.Format
   ) where
 
 import           Data.Aeson
+import qualified Data.Aeson.Key as Key
 import           Data.ByteString (ByteString)
 import           Data.List (intercalate)
 import qualified Data.Text as T
@@ -130,7 +131,7 @@ instance ToJSON FormattedArg where
     VarLengthStringArg s -> toJSON s
     ListArg xs -> toJSON xs
     StructArg fieldValues ->
-      object [ T.pack name .= value | (name, value) <- fieldValues ]
+      object [ Key.fromString name .= value | (name, value) <- fieldValues ]
 
 data FormattedReturn
   = NoReturn

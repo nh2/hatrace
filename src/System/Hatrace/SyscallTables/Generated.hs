@@ -53,7 +53,7 @@ syscallName =
     -- We use the x86_64 table to extract the names for the rendering function.
     table <- runIO $ readSyscallTable "syscalls-table/tables/syscalls-x86_64"
 
-    return $ LamCaseE [ Match (ConP (mkSyscallName name) []) (NormalB $ LitE $ StringL name) [] | (name, _) <- table ]
+    return $ LamCaseE [ Match (ConP (mkSyscallName name) [] []) (NormalB $ LitE $ StringL name) [] | (name, _) <- table ]
   )
 
 
@@ -62,7 +62,7 @@ syscallMap_x64_64 =
   $(do
     table <- runIO $ readSyscallTable "syscalls-table/tables/syscalls-x86_64"
 
-    [| Map.fromList $(return $ ListE [ TupE [LitE (IntegerL (fromIntegral num)), ConE (mkName ("Syscall_" ++ name))] | (name, Just num) <- table ]) |]
+    [| Map.fromList $(return $ ListE [ TupE [Just (LitE (IntegerL (fromIntegral num))), Just (ConE (mkName ("Syscall_" ++ name)))] | (name, Just num) <- table ]) |]
   )
 
 
@@ -71,5 +71,5 @@ syscallMap_i386 =
   $(do
     table <- runIO $ readSyscallTable "syscalls-table/tables/syscalls-i386"
 
-    [| Map.fromList $(return $ ListE [ TupE [LitE (IntegerL (fromIntegral num)), ConE (mkName ("Syscall_" ++ name))] | (name, Just num) <- table ]) |]
+    [| Map.fromList $(return $ ListE [ TupE [Just (LitE (IntegerL (fromIntegral num))), Just (ConE (mkName ("Syscall_" ++ name)))] | (name, Just num) <- table ]) |]
   )
